@@ -10,78 +10,91 @@
 
 const fs = require('fs');
 const path = require('path');
+const XLSX = require('xlsx');
+const { getGraphToken } = require('./graph-auth.cjs');
 
-// ── Config (mesmas chaves e sheets do dashboard antigo) ─────────────────
-const API_KEY    = 'AIzaSyC6g4xMmecyJjQlJcWkGtjODF_9TWMqc3w';
-const SHEET_ID   = '1mHnQXMOLom4QPQ9dZOUi48XCbK9rU-LSEJWKVTpevPQ';
-const FC_SHEET_ID = '1P2G1yC819E1mHj5Necn45IQmBgAiW0pwRDz05Vnbwrs';
-const HIST_SHEET_ID = '1ilxdmN6WSbM8mXjK9AD4gQqsTqU1Dpw1QoVklpItQO8';
-const HIST_RANGE = ['2025-01', '2025-03']; // backfill via gviz
+// ── Carrega .env.local manualmente (sem dependência) ─────────────────────
+function loadEnv() {
+  const p = path.resolve(__dirname, '../.env.local');
+  if (!fs.existsSync(p)) return;
+  const txt = fs.readFileSync(p, 'utf8');
+  for (const line of txt.split(/\r?\n/)) {
+    const m = line.match(/^([A-Z0-9_]+)=(.+)$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
+  }
+}
+loadEnv();
+
+// ── Config (fonte = Excel no SharePoint via Microsoft Graph) ─────────────
+// Migrado do Google Sheets em 2026-06. App registration "gocase-produto-refresh"
+// (Entra ID, tenant Gocase). Backup do script Google: refresh-snapshot.google.cjs.bak
+const GRAPH_CLIENT_ID = process.env.GRAPH_CLIENT_ID;
+const GRAPH_TENANT_ID = process.env.GRAPH_TENANT_ID;
+const SHAREPOINT_FILE_URL = process.env.SHAREPOINT_FILE_URL;
+// Modo arquivo local (sem admin/OAuth): se SHAREPOINT_FILE_LOCAL apontar pra um
+// .xlsx no disco, o script lê dele e ignora o Graph. Usado enquanto o
+// consentimento de admin não sai. Pra voltar pro Graph: comente/remova essa env.
+const SHAREPOINT_FILE_LOCAL = process.env.SHAREPOINT_FILE_LOCAL;
+
+if (!SHAREPOINT_FILE_LOCAL && (!GRAPH_CLIENT_ID || !GRAPH_TENANT_ID || !SHAREPOINT_FILE_URL)) {
+  console.error('✗ Defina SHAREPOINT_FILE_LOCAL (modo arquivo local) OU GRAPH_CLIENT_ID/GRAPH_TENANT_ID/SHAREPOINT_FILE_URL (modo Graph) em .env.local');
+  process.exit(1);
+}
 
 const OUT_PROCESSED  = path.resolve(__dirname, '../public/data/processed-data.json');
 const OUT_SKU_SALES  = path.resolve(__dirname, '../public/data/sales-by-sku.json');
 
-// ── Fetch helpers ───────────────────────────────────────────────────────
+// ── Graph: baixa o .xlsx e parseia abas em arrays-de-objetos ─────────────
 
-async function fetchSheetAPI(sheetId, sheetName, range = 'A1:ZZ100000') {
-  const fullRange = encodeURIComponent(sheetName + '!' + range);
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${fullRange}?key=${API_KEY}&valueRenderOption=FORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`;
-  const resp = await fetch(url);
+/** Encoding de URL de compartilhamento p/ o endpoint /shares do Graph. */
+function encodeShareUrl(url) {
+  const b64 = Buffer.from(url, 'utf8').toString('base64')
+    .replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-');
+  return 'u!' + b64;
+}
+
+/** Baixa o workbook .xlsx inteiro via Graph e devolve o Buffer. */
+async function downloadWorkbook(token, fileUrl) {
+  const share = encodeShareUrl(fileUrl);
+  const url = `https://graph.microsoft.com/v1.0/shares/${share}/driveItem/content`;
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!resp.ok) {
     const txt = await resp.text().catch(() => '');
-    throw new Error(`HTTP ${resp.status} ao buscar "${sheetName}": ${txt.slice(0, 200)}`);
+    throw new Error(`Graph download HTTP ${resp.status}: ${txt.slice(0, 300)}`);
   }
-  const json = await resp.json();
-  const values = json.values || [];
-  if (!values.length) return [];
-  const headers = values[0].map((h) => String(h).trim());
-  return values.slice(1)
+  return Buffer.from(await resp.arrayBuffer());
+}
+
+/**
+ * Converte uma aba do workbook em array-de-objetos no MESMO formato que a
+ * antiga fetchSheetAPI: 1ª linha = headers (trim), demais = { header: valor }
+ * com valores formatados (raw:false ≈ FORMATTED_VALUE do Google). Aceita uma
+ * lista de nomes candidatos e usa o 1º que existir (case-insensitive).
+ */
+function sheetToObjects(wb, candidateNames) {
+  const lowerMap = {};
+  for (const real of wb.SheetNames) lowerMap[real.toLowerCase().trim()] = real;
+  let realName = null;
+  for (const cand of candidateNames) {
+    const hit = lowerMap[String(cand).toLowerCase().trim()];
+    if (hit) { realName = hit; break; }
+  }
+  if (!realName) return { name: null, rows: [] };
+
+  const ws = wb.Sheets[realName];
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+  if (!aoa.length) return { name: realName, rows: [] };
+  const headers = (aoa[0] || []).map((h) => String(h == null ? '' : h).trim());
+  const rows = aoa.slice(1)
     .map((row) => {
       const obj = {};
-      headers.forEach((h, i) => { obj[h] = row[i] !== undefined ? String(row[i]) : ''; });
+      headers.forEach((h, i) => {
+        obj[h] = row[i] !== undefined && row[i] !== null ? String(row[i]) : '';
+      });
       return obj;
     })
     .filter((r) => Object.values(r).some((v) => v !== ''));
-}
-
-/** Backfill histórico via gviz (filtro server-side por Mês/Ano). */
-async function fetchHistoricViaGviz(fromYm, toYm) {
-  const [fromY, fromM] = fromYm.split('-').map(Number);
-  const [toY, toM] = toYm.split('-').map(Number);
-  let where;
-  if (fromY === toY) {
-    where = `K = ${fromY} and J >= ${fromM} and J <= ${toM}`;
-  } else {
-    const parts = [`(K = ${fromY} and J >= ${fromM})`];
-    for (let y = fromY + 1; y < toY; y++) parts.push(`(K = ${y})`);
-    parts.push(`(K = ${toY} and J <= ${toM})`);
-    where = parts.join(' or ');
-  }
-  const query = `select * where ${where}`;
-  const url = `https://docs.google.com/spreadsheets/d/${HIST_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent('Sales_refined')}&headers=1&tq=${encodeURIComponent(query)}`;
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`gviz HTTP ${resp.status}`);
-  const text = await resp.text();
-  const start = text.indexOf('{'), end = text.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('gviz: resposta inválida');
-  const data = JSON.parse(text.slice(start, end + 1));
-  if (data.status === 'error') {
-    const msg = (data.errors && data.errors[0] && data.errors[0].message) || 'unknown';
-    throw new Error(`gviz: ${msg}`);
-  }
-  const colNames = (data.table.cols || []).map((c) => String(c.label || c.id || '').trim());
-  return (data.table.rows || []).map((r) => {
-    const obj = {};
-    (r.c || []).forEach((cell, i) => {
-      let v = '';
-      if (cell) {
-        if (cell.f !== undefined && cell.f !== null) v = String(cell.f);
-        else if (cell.v !== undefined && cell.v !== null) v = String(cell.v);
-      }
-      obj[colNames[i]] = v;
-    });
-    return obj;
-  }).filter((r) => Object.values(r).some((v) => v !== ''));
+  return { name: realName, rows };
 }
 
 // ── Number / date parsers (pt-BR aware) ─────────────────────────────────
@@ -173,87 +186,67 @@ function parseRowDate(raw, mes, ano) {
 // ── Main ────────────────────────────────────────────────────────────────
 
 // ── Canal → Grupo (D2C / B2B / Lojas / Brindes) ───────────────────────
-// Brindes = tudo com receita ~0 (influenciadores, prototipos, bonificações).
+// Taxonomia da fonte SharePoint (Analytics BI). Mantém também os nomes
+// legados da antiga fonte Google por segurança.
 const CANAL_TO_GRUPO = {
+  // SharePoint (Analytics BI):
   'Varejo':                        'D2C',
+  'Atacado':                       'B2B',
+  'Lojas':                         'Lojas',
+  'Outros':                        'Brindes',
+  // Legado Google (mantido por compat):
   'Resellers Brasil (Extrema)':    'B2B',
   'Totem Iguatemi Store In Loco':  'Lojas',
   'Totem Iguatemi Store':          'Lojas',
   'Loja Parkshopping Brasília':    'Lojas',
   'Loja Analia Franco SP':         'Lojas',
 };
-function classifyCanal(canalRaw) {
-  // Vazio → D2C: backfill histórico Jan-Mar/25 via gviz não tem coluna Canal.
-  // No dataset atual a coluna sempre vem preenchida (44k+ linhas) — vazio só
-  // ocorre nos dados pré-redesign quando Varejo era ~100% das vendas.
+function classifyCanal(canalRaw, naturezaRaw) {
+  // Natureza=Mimo (brinde/cortesia) → Brindes, independente do canal.
+  if (String(naturezaRaw || '').trim().toLowerCase() === 'mimo') return 'Brindes';
   if (!canalRaw) return 'D2C';
   const c = String(canalRaw).trim();
   if (!c) return 'D2C';
   if (CANAL_TO_GRUPO[c]) return CANAL_TO_GRUPO[c];
-  // Canais não mapeados (Influenciadores, Prototipos, Bonificações, Requests,
-  // Outros, People*, Ilustra*) caem em Brindes — receita ~0, qtd inflacionando.
+  // Canais não mapeados caem em Brindes — receita ~0, qtd inflacionando.
   return 'Brindes';
 }
 const GRUPOS = ['D2C', 'B2B', 'Lojas', 'Brindes'];
 
 async function main() {
-  console.log('▶ Buscando Sales…');
-  let salesCurrent = [];
-  for (const sheetName of ['Sales_refined', 'Sales']) {
-    try {
-      // Range ampliado: A1:N pra pegar Canal (col C) + Faturamento (col M) + Projeção (col N)
-      salesCurrent = await fetchSheetAPI(SHEET_ID, sheetName, 'A1:N900000');
-      if (salesCurrent.length) { console.log(`  encontrado em "${sheetName}": ${salesCurrent.length} linhas`); break; }
-    } catch (e) {
-      console.log(`  tentou "${sheetName}": ${e.message.slice(0, 80)}`);
+  let buf;
+  if (SHAREPOINT_FILE_LOCAL) {
+    console.log(`▶ Modo arquivo local: lendo ${SHAREPOINT_FILE_LOCAL}`);
+    if (!fs.existsSync(SHAREPOINT_FILE_LOCAL)) {
+      throw new Error(`arquivo local não encontrado: ${SHAREPOINT_FILE_LOCAL}`);
     }
+    buf = fs.readFileSync(SHAREPOINT_FILE_LOCAL);
+    console.log(`  lido: ${(buf.length / 1024 / 1024).toFixed(2)} MB`);
+  } else {
+    console.log('▶ Autenticando no Microsoft Graph…');
+    const token = await getGraphToken({ clientId: GRAPH_CLIENT_ID, tenantId: GRAPH_TENANT_ID });
+    console.log('▶ Baixando Analytics BI.xlsx do SharePoint…');
+    buf = await downloadWorkbook(token, SHAREPOINT_FILE_URL);
+    console.log(`  baixado: ${(buf.length / 1024 / 1024).toFixed(2)} MB`);
   }
+  const wb = XLSX.read(buf, { type: 'buffer' });
+  console.log(`  abas no workbook: ${wb.SheetNames.join(' · ')}`);
 
-  console.log(`▶ Buscando histórico Jan-Mar/25 via gviz…`);
-  let salesHist = [];
-  try {
-    salesHist = await fetchHistoricViaGviz(HIST_RANGE[0], HIST_RANGE[1]);
-    console.log(`  histórico: ${salesHist.length} linhas`);
-  } catch (e) {
-    console.warn(`  histórico falhou (não-fatal): ${e.message}`);
-  }
-  // Dedupe: meses já presentes em `salesCurrent` vencem o histórico (a Sales atual
-  // tem coluna Canal; o histórico via gviz não tem). Sem isso Jan-Mar/25 dobra.
-  const currentMonths = new Set();
-  for (const r of salesCurrent) {
-    const ano = pInt(_col(r, ['Ano', 'ano']));
-    const mes = pInt(_col(r, ['Mês', 'Mes', 'mês']));
-    if (ano && mes) currentMonths.add(`${ano}-${String(mes).padStart(2, '0')}`);
-  }
-  const salesHistFiltered = salesHist.filter((r) => {
-    const ano = pInt(_col(r, ['Ano', 'ano']));
-    const mes = pInt(_col(r, ['Mês', 'Mes', 'mês']));
-    if (!ano || !mes) return true; // sem ano/mês legível: deixa o parser decidir
-    return !currentMonths.has(`${ano}-${String(mes).padStart(2, '0')}`);
-  });
-  if (salesHist.length !== salesHistFiltered.length) {
-    console.log(`  dedupe: removidas ${salesHist.length - salesHistFiltered.length} linhas do histórico (meses já em Sales)`);
-  }
-  const salesRaw = [...salesHistFiltered, ...salesCurrent];
-  console.log(`  total sales: ${salesRaw.length}`);
+  console.log('▶ Lendo Sales…');
+  // Histórico completo agora vem na própria aba Sales (Jan/25 →). O backfill
+  // via Google gviz foi removido na migração pro SharePoint.
+  const salesSheet = sheetToObjects(wb, ['Sales', 'Sales_refined', 'Vendas']);
+  const salesRaw = salesSheet.rows;
+  console.log(`  aba "${salesSheet.name}": ${salesRaw.length} linhas`);
 
-  console.log('▶ Buscando TicketSense…');
-  const costsRaw = await fetchSheetAPI(SHEET_ID, 'TicketSense', 'A1:U100000');
+  console.log('▶ Lendo TicketSense…');
+  const costsRaw = sheetToObjects(wb, ['TicketSense', 'Ticket Sense', 'Ticket']).rows;
   console.log(`  total costs: ${costsRaw.length}`);
 
-  console.log('▶ Buscando SlowMoving…');
-  let giroRaw = [];
-  for (const name of ['SlowMoving', 'Slow Moving', 'slow moving', 'SLOWMOVING']) {
-    try {
-      giroRaw = await fetchSheetAPI(SHEET_ID, name, 'A1:P2000');
-      if (giroRaw.length) { console.log(`  encontrado em "${name}": ${giroRaw.length} linhas`); break; }
-    } catch (_) { /* try next */ }
-  }
-  console.log(`  total giro: ${giroRaw.length}`);
-
-  console.log('▶ Buscando Forecast [Growth]…');
-  const fcRaw = await fetchSheetAPI(FC_SHEET_ID, 'Forecast [Growth]', 'A1:V10000');
-  console.log(`  total fc: ${fcRaw.length}`);
+  console.log('▶ Lendo SlowMoving…');
+  const giroSheet = sheetToObjects(wb, ['SlowMoving', 'Slow Moving', 'SLOWMOVING']);
+  const giroRaw = giroSheet.rows;
+  console.log(`  aba "${giroSheet.name}": ${giroRaw.length} linhas`);
 
   // ── COST_MAP ──────────────────────────────────────────────────────────
   const COST_MAP = {};
@@ -279,30 +272,9 @@ async function main() {
   }
 
   // ── FC_MAP ────────────────────────────────────────────────────────────
+  // Construído mais abaixo, a partir da coluna `Projeção` da aba Sales
+  // (precisa de skuToLinha pra resolver Linha de canais não-Varejo).
   const FC_MAP = {};
-  const MONTH_PT = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };
-  if (fcRaw.length) {
-    const fcHeaders = Object.keys(fcRaw[0] || {});
-    const fcYmCols = [];
-    fcHeaders.forEach((h) => {
-      const norm = h.toLowerCase().replace(/[.\/]/g, '').trim();
-      const m = norm.match(/^([a-z]{3})\s*(\d{4})$/);
-      if (m) {
-        const mon = MONTH_PT[m[1].substring(0, 3)];
-        if (mon) fcYmCols.push({ h, ym: `${m[2]}-${String(mon).padStart(2, '0')}` });
-      }
-    });
-    for (const r of fcRaw) {
-      const lin = r['Nome da Linha'] || r['Linha'] || r['nome da linha'] || r['linha'] || '';
-      const tipo = (r['Projetado'] || r['projetado'] || '').toLowerCase();
-      if (!lin || tipo === 'mimo') continue;
-      if (!FC_MAP[lin]) FC_MAP[lin] = {};
-      fcYmCols.forEach(({ h, ym }) => {
-        const v = parseFloat(String(r[h] || '').replace(',', '.')) || 0;
-        if (v > 0) FC_MAP[lin][ym] = (FC_MAP[lin][ym] || 0) + v;
-      });
-    }
-  }
 
   // ── Lookup SKU → Linha (a partir de SlowMoving) ──────────────────────
   // Canais não-Varejo só vêm com SKU Único preenchido (Linha/MacroLinha vazia).
@@ -318,6 +290,34 @@ async function main() {
       if (categoria) skuToCategoria[sku] = categoria;
     }
   }
+
+  // ── FC_MAP a partir da coluna `Projeção` (aba Sales) ──────────────────
+  // Projeção = QUANTIDADE projetada por linha/mês. O frontend trata FC_MAP como
+  // quantidade (atingimento = qtd_realizada / forecastQtd − 1), exatamente como
+  // a antiga aba "Forecast [Growth]" fazia. Passo SEPARADO do loop de vendas
+  // porque meses futuros têm Projeção mas qtd=0 (seriam descartados pelo filtro).
+  const PROJ_COLS = ['Projeção', 'Projecao', 'Projeçao', 'Projecão', 'Projeção', 'projeção', 'Projeção (Qtd)', 'Projecao Qtd'];
+  let fcTotal = 0;
+  for (const r of salesRaw) {
+    // Mimo (cortesia) não entra no forecast — espelha o antigo descarte de 'mimo'.
+    if (String(_col(r, ['Natureza', 'natureza']) || '').trim().toLowerCase() === 'mimo') continue;
+    let lin = _col(r, ['Linha', 'linha']);
+    const sku = _col(r, ['SKU Único', 'SKU Unico', 'SKU Atual', 'sku']);
+    if (!lin && sku && skuToLinha[sku]) lin = skuToLinha[sku];
+    if (!lin) continue;
+    const proj = pNum(_col(r, PROJ_COLS));
+    if (proj <= 0) continue;
+    const mes = pInt(_col(r, ['Mês', 'Mes', 'mês']));
+    const ano = pInt(_col(r, ['Ano', 'ano']));
+    const rawDate = _col(r, ['Data', 'DATA', 'Date', 'date', 'Período', 'Periodo', 'Dia', 'dia']);
+    const dt = parseRowDate(rawDate, mes, ano);
+    if (!dt) continue;
+    const ym = dt.slice(0, 7);
+    if (!FC_MAP[lin]) FC_MAP[lin] = {};
+    FC_MAP[lin][ym] = (FC_MAP[lin][ym] || 0) + proj;
+    fcTotal += proj;
+  }
+  console.log(`  FC_MAP: ${Object.keys(FC_MAP).length} linhas · soma Projeção = ${Math.round(fcTotal).toLocaleString('pt-BR')} un (baseline Google ≈ 8.664.917)`);
 
   // ── Sales processing (salesByLinha + salesBySku) ──────────────────────
   const FAT_COLS = ['Faturamento', 'Receita Produto (pós-desconto)', 'Receita Produto', 'Receita'];
@@ -362,9 +362,10 @@ async function main() {
     if (!dt) { skipped++; continue; }
     const ym = dt.slice(0, 7);
 
-    // Canal → grupo
+    // Canal → grupo (Natureza=Mimo força Brindes)
     const canalRaw = _col(r, ['Canal', 'canal', 'CANAL']);
-    const grupo = classifyCanal(canalRaw);
+    const naturezaRaw = _col(r, ['Natureza', 'natureza', 'NATUREZA']);
+    const grupo = classifyCanal(canalRaw, naturezaRaw);
 
     // salesByLinha (mantém qtd/receita totais pra back-compat; byCanal pra filtro)
     if (!salesByLinha[lin]) salesByLinha[lin] = { categoria: cat || '—', status, months: {} };
@@ -501,8 +502,8 @@ async function main() {
     collectedAt: new Date().toISOString(),
     period: { from: allYms[0] || '', to: allYms[allYms.length - 1] || '', fromDay: null, toDay: null },
     qualityScore: 100,
-    apiStatus: { sales: true, ticketsense: true, slowmoving: giroRaw.length > 0, forecast: fcRaw.length > 0 },
-    apisLoaded: [salesRaw, costsRaw, giroRaw, fcRaw].filter((a) => a.length > 0).length,
+    apiStatus: { sales: true, ticketsense: true, slowmoving: giroRaw.length > 0, forecast: Object.keys(FC_MAP).length > 0 },
+    apisLoaded: [salesRaw, costsRaw, giroRaw].filter((a) => a.length > 0).length,
     totalSalesRows: salesRaw.length,
     filteredRows: validRows,
     linhasInPeriod: Object.keys(salesByLinha).length,
