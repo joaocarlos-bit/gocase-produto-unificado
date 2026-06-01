@@ -1,0 +1,10 @@
+.vercel
+node_modules
+.env
+.env.local
+.env*.local
+dist
+# dados gerados pelo `npm run refresh` (regenerados antes de cada deploy)
+public/data/*.json
+# arquivos auxiliares
+*.tmp

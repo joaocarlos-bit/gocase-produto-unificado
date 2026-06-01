@@ -1,0 +1,30 @@
+{
+  "name": "gocase-performance-dashboard-v2",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Dashboard de Performance Gocase — redesign (squad performance-produtos-gocase)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "refresh": "node scripts/refresh-snapshot.cjs",
+    "refresh-skus": "node scripts/extract-sku-sales.cjs",
+    "refresh-stamped": "node scripts/refresh-stamped.cjs"
+  },
+  "dependencies": {
+    "jose": "^5.9.6",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.13.3",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}
