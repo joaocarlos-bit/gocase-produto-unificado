@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Header } from './components/Header';
-import { Nav, type ScreenId } from './components/Nav';
+import { Sidebar, type ScreenId } from './components/Sidebar';
+import { Placeholder } from './screens/Placeholder';
+import { Engenharia } from './screens/gestao/Engenharia';
+import { Waitlists } from './screens/gestao/Waitlists';
+import { LancamentosGestao } from './screens/gestao/LancamentosGestao';
+import { Prazo } from './screens/gestao/Prazo';
+import { Projetos } from './screens/gestao/Projetos';
 import { Pulso } from './screens/Pulso';
 import { Lancamentos } from './screens/Lancamentos';
 import { Produto } from './screens/Produto';
@@ -21,6 +27,7 @@ type AppState =
 export function App() {
   const [state, setState] = useState<AppState>({ kind: 'loading' });
   const [screen, setScreen] = useState<ScreenId>('pulso');
+  const [navOpen, setNavOpen] = useState<boolean>(() => localStorage.getItem('nav_open') !== '0');
   // Default: só D2C — KPIs principais ficam limpos de brindes/B2B/lojas.
   // Aba "Canais" ignora esse filtro (mostra sempre todos os canais).
   const [canais, setCanais] = useState<CanalGrupo[]>(['D2C']);
@@ -96,17 +103,31 @@ export function App() {
         canais={canais}
         onChangeCanais={setCanais}
       />
-      <Nav current={screen} onChange={setScreen} />
-      <main className="app__main">
-        {screen === 'pulso' && <Pulso data={filteredData} />}
-        {screen === 'lancamentos' && <Lancamentos data={filteredData} sales={filteredSales} />}
-        {screen === 'produto' && <Produto data={filteredData} sales={filteredSales} />}
-        {screen === 'portfolio' && <Portfolio data={filteredData} />}
-        {screen === 'estoque' && <Estoque data={filteredData} />}
-        {screen === 'canais' && <Canais data={data} sales={sales} />}
-        {screen === 'clientes' && <Clientes />}
-        {screen === 'roadmap' && <RoadmapScreen />}
-      </main>
+      <div className="app__body">
+        <Sidebar
+          current={screen}
+          onChange={setScreen}
+          open={navOpen}
+          onToggle={() => setNavOpen((o) => { localStorage.setItem('nav_open', o ? '0' : '1'); return !o; })}
+        />
+        <main className="app__main">
+          {/* Performance — gocase-produto */}
+          {screen === 'pulso' && <Pulso data={filteredData} />}
+          {screen === 'lancamentos' && <Lancamentos data={filteredData} sales={filteredSales} />}
+          {screen === 'produto' && <Produto data={filteredData} sales={filteredSales} />}
+          {screen === 'portfolio' && <Portfolio data={filteredData} />}
+          {screen === 'estoque' && <Estoque data={filteredData} />}
+          {screen === 'canais' && <Canais data={data} sales={sales} />}
+          {screen === 'clientes' && <Clientes />}
+          {screen === 'roadmap' && <RoadmapScreen />}
+          {/* Gestão — dash-produto (em migração) */}
+          {screen === 'g_engenharia' && <Engenharia />}
+          {screen === 'g_lancamentos' && <LancamentosGestao />}
+          {screen === 'g_waitlists' && <Waitlists />}
+          {screen === 'g_prazo' && <Prazo />}
+          {screen === 'g_projetos' && <Projetos />}
+        </main>
+      </div>
     </div>
   );
 }

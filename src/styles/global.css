@@ -64,8 +64,16 @@ a {
   flex-direction: column;
 }
 
+/* corpo = sidebar (esquerda) + conteúdo */
+.app__body {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+}
+
 .app__main {
   flex: 1;
+  min-width: 0; /* impede gráficos/tabelas largos de estourar o flex item */
   padding: 24px 32px 48px;
   max-width: 1600px;
   width: 100%;
@@ -73,6 +81,9 @@ a {
 }
 
 @media (max-width: 900px) {
+  .app__body {
+    flex-direction: column;
+  }
   .app__main {
     padding: 16px;
   }
