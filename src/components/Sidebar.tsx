@@ -7,9 +7,11 @@ export type ScreenId =
   // Performance (gocase-produto)
   | 'pulso' | 'lancamentos' | 'produto' | 'portfolio' | 'estoque' | 'canais' | 'clientes' | 'roadmap'
   // Gestão (dash-produto) — prefixo g_ pra não colidir com 'lancamentos' do Performance
-  | 'g_engenharia' | 'g_lancamentos' | 'g_waitlists' | 'g_prazo' | 'g_projetos';
+  | 'g_engenharia' | 'g_lancamentos' | 'g_waitlists' | 'g_prazo' | 'g_projetos'
+  // Importação (Controle de Importações) — prefixo imp_
+  | 'imp_custos';
 
-export type Front = 'gestao' | 'performance';
+export type Front = 'gestao' | 'performance' | 'importacao';
 
 export interface NavItem {
   id: ScreenId;
@@ -51,6 +53,14 @@ export const SECTIONS: NavSection[] = [
       { id: 'canais',      label: 'Canais',      ready: true },
       { id: 'clientes',    label: 'Clientes',    ready: true },
       { id: 'roadmap',     label: 'Roadmap',     ready: true },
+    ],
+  },
+  {
+    front: 'importacao',
+    label: 'Importação',
+    hint: 'Controle de Importações',
+    items: [
+      { id: 'imp_custos', label: 'Histórico de Custos', ready: true },
     ],
   },
 ];

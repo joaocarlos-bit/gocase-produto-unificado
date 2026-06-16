@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "refresh": "node scripts/refresh-snapshot.cjs",
     "refresh-skus": "node scripts/extract-sku-sales.cjs",
-    "refresh-stamped": "node scripts/refresh-stamped.cjs"
+    "refresh-stamped": "node scripts/refresh-stamped.cjs",
+    "refresh-import": "node scripts/refresh-import-costs.cjs"
   },
   "dependencies": {
     "jose": "^5.9.6",

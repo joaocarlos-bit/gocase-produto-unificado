@@ -15,6 +15,7 @@ import { Estoque } from './screens/Estoque';
 import { Canais } from './screens/Canais';
 import { Clientes } from './screens/Clientes';
 import { RoadmapScreen } from './screens/RoadmapScreen';
+import { HistoricoCustos } from './screens/importacao/HistoricoCustos';
 import { loadProcessedData, loadSalesBySku } from './data/loader';
 import { applyChannelFilter, applyChannelFilterToSales } from './data/aggregates';
 import type { CanalGrupo, ProcessedData, SalesBySkuPayload } from './data/types';
@@ -126,6 +127,8 @@ export function App() {
           {screen === 'g_waitlists' && <Waitlists />}
           {screen === 'g_prazo' && <Prazo />}
           {screen === 'g_projetos' && <Projetos />}
+          {/* Importação — Controle de Importações */}
+          {screen === 'imp_custos' && <HistoricoCustos />}
         </main>
       </div>
     </div>
