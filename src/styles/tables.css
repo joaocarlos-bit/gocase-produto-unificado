@@ -1,0 +1,231 @@
+/* ─────────────────────────────────────────────────────────────
+   Shared minimal table styles — Lançamentos & Materiais
+   Inspirado em tabelas BI tradicionais: numerado, denso, sem
+   pills nem emojis nas células. Sinal por cor de texto sutil.
+   ───────────────────────────────────────────────────────────── */
+
+.tbl {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.tbl__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tbl__count {
+  font-size: 11px;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.tbl__count-sub {
+  color: var(--text-3);
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.tbl__export {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 3px 10px;
+}
+.tbl__export:hover {
+  color: var(--teal);
+  border-color: var(--teal);
+}
+
+.tbl__wrap {
+  overflow-x: auto;
+  max-height: 640px;
+  overflow-y: auto;
+}
+
+.tbl__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tbl__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  border-bottom: 1.5px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.tbl__table thead th:hover { color: var(--teal); }
+.tbl__table thead th.on { color: var(--text); font-weight: 700; }
+.tbl__table thead th.right { text-align: right; }
+.tbl__table thead th.num-col { padding-left: 14px; }
+
+.tbl__sort {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 10px;
+  color: var(--text-3);
+}
+.tbl__table thead th.on .tbl__sort {
+  color: var(--teal);
+}
+
+.tbl__table tbody td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  white-space: nowrap;
+}
+.tbl__table tbody td.right { text-align: right; }
+.tbl__table tbody tr:last-child td { border-bottom: none; }
+.tbl__table tbody tr:hover { background: var(--surface-2); }
+
+/* Coluna de numeração */
+.tbl__num {
+  width: 32px;
+  color: var(--text-3);
+  font-weight: 500;
+  text-align: right;
+  padding-right: 4px;
+  padding-left: 12px;
+}
+
+/* Primeira coluna textual = identificador primário */
+.tbl__primary {
+  font-weight: 600;
+  color: var(--text);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tbl__secondary {
+  color: var(--text-2);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tbl__muted {
+  color: var(--text-2);
+}
+
+.tbl__faded {
+  color: var(--text-3);
+}
+
+.tbl__strong {
+  font-weight: 600;
+}
+
+/* Sinais de cor para Δ e classificações — texto colorido, sem fundo */
+.tbl__pos { color: var(--green); }
+.tbl__neg { color: var(--red); }
+.tbl__warn { color: var(--amber); }
+.tbl__info { color: var(--teal); }
+
+.tbl__note {
+  font-size: 10px;
+  color: var(--text-3);
+  padding: 7px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.tbl__empty {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 28px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+/* ────────────────────────────────────────────────────────────
+   STICKY-2COL MODIFIER
+   Congela # (1ª) e a primeira coluna textual (2ª) durante
+   scroll horizontal. Necessário em tabelas largas (Material).
+   ──────────────────────────────────────────────────────────── */
+
+/* Cabeçalho — fica no topo + à esquerda */
+.tbl--sticky-2col .tbl__table thead th:nth-child(1),
+.tbl--sticky-2col .tbl__table thead th:nth-child(2) {
+  position: sticky;
+  background: var(--surface);
+  z-index: 3;
+}
+.tbl--sticky-2col .tbl__table thead th:nth-child(1) {
+  left: 0;
+}
+.tbl--sticky-2col .tbl__table thead th:nth-child(2) {
+  left: 32px;
+  box-shadow: 1px 0 0 var(--border);
+}
+
+/* Body — só fica à esquerda */
+.tbl--sticky-2col .tbl__table tbody td:nth-child(1),
+.tbl--sticky-2col .tbl__table tbody td:nth-child(2) {
+  position: sticky;
+  background: var(--surface);
+  z-index: 1;
+}
+.tbl--sticky-2col .tbl__table tbody td:nth-child(1) {
+  left: 0;
+}
+.tbl--sticky-2col .tbl__table tbody td:nth-child(2) {
+  left: 32px;
+  box-shadow: 1px 0 0 var(--border);
+}
+
+/* Hover preserva sticky background */
+.tbl--sticky-2col .tbl__table tbody tr:hover td:nth-child(1),
+.tbl--sticky-2col .tbl__table tbody tr:hover td:nth-child(2) {
+  background: var(--surface-2);
+}
+
+/* ────────────────────────────────────────────────────────────
+   CLICKABLE / SELECTED ROW (cross-filter)
+   ──────────────────────────────────────────────────────────── */
+
+.tbl--clickable .tbl__table tbody tr {
+  cursor: pointer;
+}
+
+.tbl__table tbody tr.is-selected td {
+  background: var(--brand-blue-l) !important;
+  color: var(--brand-blue-d);
+}
+.tbl__table tbody tr.is-selected td.tbl__primary {
+  font-weight: 700;
+  color: var(--brand-blue-d);
+}
+.tbl__table tbody tr.is-selected:hover td {
+  background: var(--brand-blue-l) !important;
+}
+
+/* Sticky cells of selected row also turn blue */
+.tbl--sticky-2col .tbl__table tbody tr.is-selected td:nth-child(1),
+.tbl--sticky-2col .tbl__table tbody tr.is-selected td:nth-child(2) {
+  background: var(--brand-blue-l) !important;
+}

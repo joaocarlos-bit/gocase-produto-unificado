@@ -1,0 +1,58 @@
+:root {
+  /* ── Brand (padrão "PRODUTO GOCASE / GoGroup") ──
+     Header em gradiente azul, accent verde-lima e neutrals slate. */
+  --brand-blue:    #1e5fb8;
+  --brand-blue-d:  #1d4fa3;
+  --brand-blue-l:  #dbeafe;
+  --accent:        #c8e74c;    /* verde-lima (rocket / tab ativa) */
+  --accent-d:      #84cc16;    /* verde-lime escuro (active dot) */
+  --accent-l:      #ecfccb;
+
+  /* Alias mantidos pra compatibilidade com componentes antigos */
+  --teal:   var(--brand-blue);
+  --teal-d: var(--brand-blue-d);
+  --teal-l: var(--brand-blue-l);
+  --teal-m: #a8c9f0;
+
+  /* Status palette (Tailwind-ish) */
+  --green:    #059669;
+  --green-l:  #d1fae5;
+  --red:      #dc2626;
+  --red-l:    #fee2e2;
+  --amber:    #d97706;
+  --amber-l:  #fef3c7;
+  --purple:   #7c3aed;
+  --purple-l: #ede9fe;
+  --indigo:   #4f46e5;
+
+  /* Neutrals (slate) */
+  --bg:        #f8fafc;
+  --surface:   #ffffff;
+  --surface-2: #f8fafc;
+  --text:      #0f172a;
+  --text-2:    #64748b;
+  --text-3:    #94a3b8;
+  --border:    #e2e8f0;
+  --border-2:  #cbd5e1;
+  --border-3:  #f1f5f9;
+
+  /* Categoria palette */
+  --cat-textil:  #5b6dd5;
+  --cat-termico: #e07b20;
+  --cat-uv:      #6a3ec5;
+  --cat-gift:    #1a9e5c;
+  --cat-spare:   #c05ca0;
+  --cat-tech:    #4a7ec0;
+
+  /* Type-scale */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Radii / shadows */
+  --r-sm: 7px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 8px 24px rgba(15, 23, 42, 0.10);
+}

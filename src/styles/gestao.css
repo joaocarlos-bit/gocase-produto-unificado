@@ -1,0 +1,92 @@
+/* Estilos compartilhados das telas de Gestão (dash-produto portado).
+   Global porque as telas reusam as mesmas classes — não pode ficar preso ao
+   <style> de um único componente (senão some quando outra tela monta). */
+
+/* cabeçalho de tela */
+.g-eng__head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }
+.g-eng__title { font-size: 22px; font-weight: 800; color: var(--text); }
+.g-eng__tag { font-size: 11px; font-weight: 600; color: var(--text-3); background: var(--surface-2); border: 1px solid var(--border); padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle; }
+.g-eng__meta { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-3); }
+.g-eng__kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+.g-eng__charts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+.g-retry { font-size: 11px; font-weight: 700; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); }
+.g-retry:hover { background: var(--border); color: var(--text); }
+.g-status { display: flex; align-items: center; gap: 10px; padding: 40px; color: var(--text-2); font-size: 13px; }
+.g-status--err { color: var(--red); flex-wrap: wrap; }
+
+/* filtros / chips / inputs */
+.g-wl__period { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.g-chip { font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); }
+.g-chip--on { background: var(--brand-blue); border-color: var(--brand-blue); color: #fff; }
+.g-input { font-size: 12px; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+
+/* tabelas */
+.g-tablewrap { overflow-x: auto; }
+.g-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.g-table th { text-align: left; padding: 10px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); border-bottom: 1px solid var(--border); white-space: nowrap; position: sticky; top: 0; background: var(--surface); }
+.g-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; color: var(--text); }
+.g-table tr:hover td { background: var(--surface-2); }
+.g-table td.c { text-align: center; font-variant-numeric: tabular-nums; }
+.g-table td.b { font-weight: 700; }
+.g-table td.m { color: var(--text-2); }
+.g-table td.g { color: var(--green); font-weight: 700; }
+.g-name { font-weight: 600; width: 1px; white-space: nowrap; }
+.g-name__text { display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; vertical-align: middle; }
+.g-empty { text-align: center; padding: 28px; color: var(--text-3); font-size: 13px; }
+
+/* indicadores de performance */
+.perf-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 6px; vertical-align: middle; }
+.perf-dot--bom { background: var(--green); }
+.perf-dot--med { background: var(--amber); }
+.perf-dot--ruim { background: var(--red); }
+.ctr-cell { padding: 2px 7px; border-radius: 5px; font-weight: 700; }
+.ctr-cell--hit { background: var(--green-l); color: var(--green); }
+.ctr-cell--bom { background: var(--green-l); color: var(--green); }
+.ctr-cell--med { background: var(--amber-l); color: var(--amber); }
+.ctr-cell--ruim { background: var(--red-l); color: var(--red); }
+.g-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; background: var(--surface-2); color: var(--text-2); }
+.g-badge--on { background: var(--green-l); color: var(--green); }
+
+/* ranking */
+.g-rank { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.g-rank li { display: grid; grid-template-columns: 28px 1fr auto auto; align-items: center; gap: 12px; padding: 8px 6px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.g-rank__pos { font-weight: 800; color: var(--text-3); text-align: center; }
+.g-rank__name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-rank__val { font-weight: 800; color: var(--green); font-variant-numeric: tabular-nums; }
+.g-rank__leads { font-size: 11px; color: var(--text-3); min-width: 70px; text-align: right; }
+
+/* contadores clicáveis (Lançamentos) + modal */
+.g-count { font-weight: 800; font-variant-numeric: tabular-nums; padding: 2px 10px; border-radius: 6px; cursor: pointer; }
+.g-count--green { background: var(--green-l); color: var(--green); }
+.g-count--red { background: var(--red-l); color: var(--red); }
+.g-count:hover { filter: brightness(0.95); }
+.g-modal { position: fixed; inset: 0; background: rgba(15,23,42,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+.g-modal__box { background: var(--surface); border-radius: var(--r-md); width: 100%; max-width: 460px; max-height: 80vh; display: flex; flex-direction: column; box-shadow: var(--shadow-md); }
+.g-modal__head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.g-modal__x { font-size: 16px; color: var(--text-3); padding: 2px 8px; }
+.g-modal__body { padding: 12px 18px 18px; overflow-y: auto; }
+.g-modal__item { border-left: 3px solid; padding: 8px 12px; margin-bottom: 8px; background: var(--surface-2); border-radius: 0 6px 6px 0; }
+.g-modal__nome { font-size: 13px; font-weight: 600; color: var(--text); }
+.g-modal__motivo { font-size: 11px; color: var(--text-3); margin-top: 3px; }
+
+.g-mut { color: var(--text-3); }
+
+/* Prazo — separadores de mês e linhas */
+.pz-month td { background: var(--surface-2); font-weight: 800; font-size: 12px; color: var(--text); text-transform: none; letter-spacing: 0; }
+.pz-count { font-weight: 500; color: var(--text-3); font-size: 11px; margin-left: 10px; }
+.pz-subhead td { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); background: var(--surface); }
+.pz-ok { color: var(--green); font-weight: 700; }
+
+/* barra de filtro de período (acima das tabelas) */
+.g-periodbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); }
+.g-periodbar__lbl { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-3); margin-right: 4px; }
+
+/* grid das 2 tabelas de ranking lado a lado */
+.g-rank2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+@media (max-width: 1000px) { .g-rank2 { grid-template-columns: 1fr; } }
+
+@media (max-width: 1000px) {
+  .g-eng__kpis { grid-template-columns: repeat(2, 1fr); }
+  .g-eng__charts { grid-template-columns: 1fr; }
+}
