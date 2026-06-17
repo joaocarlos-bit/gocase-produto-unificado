@@ -3,7 +3,7 @@ import {
   Bar, BarChart, CartesianGrid, Cell, LabelList, Legend,
   Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import type { ProcessedData, SalesBySkuPayload, Ym } from '../data/types';
+import type { ProcessedData, SalesBySkuPayload, Status, Ym } from '../data/types';
 import { allMonthsWithCurrent, latestMonth, linhaMonthlySeries } from '../data/aggregates';
 
 // Paleta de cores curada pro pie/legend (índice = posição no ranking)
@@ -48,6 +48,25 @@ interface ColorRow {
   shareQtd: number;
   shareReceita: number;
   margemPct: number | null;
+  status: Status | null;
+}
+
+// Badge de status por SKU — cores semânticas alinhadas aos tokens do tema
+function StatusBadge({ status }: { status: string | null }) {
+  if (!status) return <span style={{ color: 'var(--text-3)' }}>—</span>;
+  const s = status.toLocaleLowerCase('pt-BR');
+  let bg = 'var(--surface-2)', fg = 'var(--text-2)';
+  if (s.includes('lança') || s.includes('lanca')) { bg = 'var(--brand-blue-l)'; fg = 'var(--brand-blue-d)'; }
+  else if (s.includes('descontinuad')) { bg = 'var(--red-l)'; fg = 'var(--red)'; }
+  else if (s.includes('recompra') || s.includes('linha')) { bg = 'var(--green-l)'; fg = 'var(--green)'; }
+  return (
+    <span style={{
+      display: 'inline-block', fontSize: 10, fontWeight: 700, padding: '3px 9px',
+      borderRadius: 99, background: bg, color: fg, letterSpacing: '0.2px', whiteSpace: 'nowrap',
+    }}>
+      {status}
+    </span>
+  );
 }
 
 export function Produto({ data, sales }: Props) {
@@ -113,7 +132,7 @@ export function Produto({ data, sales }: Props) {
       .filter(([, s]) => s.linha === linha)
       .map(([sku]) => sku);
 
-    const colorsRaw: { sku: string; qtd: number; receita: number; custo: number | null }[] = [];
+    const colorsRaw: { sku: string; qtd: number; receita: number; custo: number | null; status: Status | null }[] = [];
     for (const sku of skusOfLinha) {
       const skuSales = sales.salesBySku[sku];
       if (!skuSales) continue;
@@ -125,7 +144,8 @@ export function Produto({ data, sales }: Props) {
       }
       if (qtd > 0 || receita > 0) {
         const skuCusto = data.STOCK_MAP[sku]?.custo ?? null;
-        colorsRaw.push({ sku, qtd, receita, custo: skuCusto });
+        const skuStatus = data.STOCK_MAP[sku]?.status ?? null;
+        colorsRaw.push({ sku, qtd, receita, custo: skuCusto, status: skuStatus });
       }
     }
 
@@ -143,6 +163,7 @@ export function Produto({ data, sales }: Props) {
           shareQtd: totColorQtd > 0 ? (c.qtd / totColorQtd) * 100 : 0,
           shareReceita: totColorReceita > 0 ? (c.receita / totColorReceita) * 100 : 0,
           margemPct,
+          status: c.status,
         };
       })
       .sort((a, b) => b.receita - a.receita);
@@ -341,6 +362,7 @@ export function Produto({ data, sales }: Props) {
                 shareQtd: rest.reduce((s, c) => s + c.shareQtd, 0),
                 ticketMedio: 0,
                 margemPct: null,
+                status: null,
                 _color: PIE_PALETTE[7],
                 _isOutros: true,
               },
@@ -463,6 +485,7 @@ export function Produto({ data, sales }: Props) {
                             <th style={{ padding: '10px 8px', textAlign: 'right', fontSize: 10, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Qtd</th>
                             <th style={{ padding: '10px 8px', textAlign: 'right', fontSize: 10, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Receita</th>
                             <th style={{ padding: '10px 8px', textAlign: 'right', fontSize: 10, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Share</th>
+                            <th style={{ padding: '10px 8px', textAlign: 'right', fontSize: 10, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Ticket médio</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -478,6 +501,7 @@ export function Produto({ data, sales }: Props) {
                                 <td style={{ padding: '9px 8px', textAlign: 'right' }}>{fmtNum(c.qtd)}</td>
                                 <td style={{ padding: '9px 8px', textAlign: 'right', fontWeight: 700 }}>{fmtBRL(c.receita)}</td>
                                 <td style={{ padding: '9px 8px', textAlign: 'right', color: 'var(--text-2)' }}>{c.shareReceita.toFixed(1)}%</td>
+                                <td style={{ padding: '9px 8px', textAlign: 'right', color: 'var(--text-2)' }}>R$ {c.ticketMedio.toFixed(2)}</td>
                               </tr>
                             );
                           })}
@@ -551,6 +575,7 @@ export function Produto({ data, sales }: Props) {
                       <tr>
                         <th>#</th>
                         <th>SKU / Variação</th>
+                        <th>Status</th>
                         <th className="right">Qtd</th>
                         <th className="right">Share qtd</th>
                         <th className="right">Receita</th>
@@ -567,6 +592,7 @@ export function Produto({ data, sales }: Props) {
                             <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: PIE_PALETTE[i % PIE_PALETTE.length], marginRight: 6, verticalAlign: 'middle' }} />
                             {c.sku}
                           </td>
+                          <td><StatusBadge status={c.status} /></td>
                           <td className="right">{fmtNum(c.qtd)}</td>
                           <td className="right tbl__muted">{c.shareQtd.toFixed(1)}%</td>
                           <td className="right tbl__strong">{fmtBRL(c.receita)}</td>

@@ -3,6 +3,7 @@ import type { ProcessedData, Ym } from '../data/types';
 import {
   aggregatedMonthlySeries,
   allMonthsWithCurrent,
+  getSubcategoria,
   latestMonth,
   linhaMonthlySeries,
   paretoBreak,
@@ -27,6 +28,7 @@ export function Portfolio({ data }: Props) {
 
   const [range, setRange] = useState<{ from: Ym; to: Ym }>({ from: defaultFrom, to: latest });
   const [filterCats, setFilterCats] = useState<string[]>([]);
+  const [filterSubcats, setFilterSubcats] = useState<string[]>([]);
   const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
   const [filterLinhas, setFilterLinhas] = useState<string[]>([]);
   const [search, setSearch] = useState<string>('');
@@ -49,6 +51,11 @@ export function Portfolio({ data }: Props) {
     () => Array.from(new Set(portfolio.map((r) => r.categoria))).sort(),
     [portfolio],
   );
+  const subcategorias = useMemo(
+    () => Array.from(new Set(portfolio.map((r) => getSubcategoria(r.linha))))
+      .sort((a, b) => a.localeCompare(b, 'pt-BR')),
+    [portfolio],
+  );
   const statuses = useMemo(
     () => Array.from(new Set(portfolio.map((r) => r.status))).sort(),
     [portfolio],
@@ -63,20 +70,21 @@ export function Portfolio({ data }: Props) {
     return portfolio.filter(
       (r) =>
         (filterCats.length === 0 || filterCats.includes(r.categoria)) &&
+        (filterSubcats.length === 0 || filterSubcats.includes(getSubcategoria(r.linha))) &&
         (filterStatuses.length === 0 || filterStatuses.includes(r.status)) &&
         (filterLinhas.length === 0 || filterLinhas.includes(r.linha)) &&
         (selectedLinha == null || r.linha === selectedLinha) &&
         (q === '' || r.linha.toLocaleLowerCase('pt-BR').includes(q)),
     );
-  }, [portfolio, filterCats, filterStatuses, filterLinhas, search, selectedLinha]);
+  }, [portfolio, filterCats, filterSubcats, filterStatuses, filterLinhas, search, selectedLinha]);
 
-  // Série mensal:
-  //   - se uma linha está selecionada → trajetória dela ao longo do snapshot inteiro
-  //   - caso contrário → agregado de TODAS as linhas filtradas (categoria, status, linha, busca)
+  // Série mensal — restrita ao período selecionado no picker:
+  //   - se uma linha está selecionada → trajetória dela dentro do período
+  //   - caso contrário → agregado de TODAS as linhas filtradas (categoria, subcategoria, status, linha, busca)
   const monthlySeries = useMemo(() => {
-    if (selectedLinha) return linhaMonthlySeries(data, selectedLinha);
-    return aggregatedMonthlySeries(data, filtered.map((r) => r.linha));
-  }, [data, selectedLinha, filtered]);
+    if (selectedLinha) return linhaMonthlySeries(data, selectedLinha, range.from, range.to);
+    return aggregatedMonthlySeries(data, filtered.map((r) => r.linha), range.from, range.to);
+  }, [data, selectedLinha, filtered, range]);
 
   const monthlyLabel = selectedLinha ?? (
     filtered.length === portfolio.length
@@ -120,6 +128,15 @@ export function Portfolio({ data }: Props) {
             options={categorias}
             value={filterCats}
             onChange={setFilterCats}
+            allLabel="Todas"
+          />
+        </div>
+        <div className="pf__filter-grp">
+          <span className="pf__filter-lbl">Subcategoria</span>
+          <MultiSelect
+            options={subcategorias}
+            value={filterSubcats}
+            onChange={setFilterSubcats}
             allLabel="Todas"
           />
         </div>
@@ -217,7 +234,8 @@ export function Portfolio({ data }: Props) {
       <div className="section-title">
         📈 Detalhe mês a mês · {monthlyLabel}
         <span style={{ color: 'var(--text-3)', fontWeight: 400, marginLeft: 6 }}>
-          receita, quantidade e margem bruta · {selectedLinha ? 'snapshot inteiro da linha' : 'agregado das linhas no escopo'}
+          receita, quantidade e margem bruta · {ymLabel(range.from)} → {ymLabel(range.to)}
+          {selectedLinha ? ' · trajetória da linha' : ' · agregado das linhas no escopo'}
         </span>
       </div>
       <LinhaMonthlyChart data={monthlySeries} linha={monthlyLabel} />
