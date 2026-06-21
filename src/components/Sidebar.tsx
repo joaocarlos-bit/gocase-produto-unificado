@@ -4,6 +4,8 @@
 //   - Performance → telas do gocase-produto (já funcionais)
 
 export type ScreenId =
+  // Geral — prefixo gr_
+  | 'gr_feed' | 'gr_links'
   // Performance (gocase-produto)
   | 'pulso' | 'lancamentos' | 'produto' | 'portfolio' | 'estoque' | 'canais' | 'clientes' | 'roadmap'
   // Gestão (dash-produto) — prefixo g_ pra não colidir com 'lancamentos' do Performance
@@ -11,7 +13,7 @@ export type ScreenId =
   // Importação (Controle de Importações) — prefixo imp_
   | 'imp_custos';
 
-export type Front = 'gestao' | 'performance' | 'importacao';
+export type Front = 'geral' | 'gestao' | 'performance' | 'importacao';
 
 export interface NavItem {
   id: ScreenId;
@@ -28,6 +30,15 @@ export interface NavSection {
 }
 
 export const SECTIONS: NavSection[] = [
+  {
+    front: 'geral',
+    label: 'Geral',
+    hint: 'Feed & Links',
+    items: [
+      { id: 'gr_feed',  label: 'Comentários & Feedbacks', ready: true },
+      { id: 'gr_links', label: 'Central de Links',         ready: true },
+    ],
+  },
   {
     front: 'gestao',
     label: 'Gestão',

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { Feed } from './screens/geral/Feed';
+import { CentralLinks } from './screens/geral/CentralLinks';
 import { Header } from './components/Header';
 import { Sidebar, type ScreenId } from './components/Sidebar';
 import { Placeholder } from './screens/Placeholder';
@@ -113,8 +115,11 @@ export function App() {
           onToggle={() => setNavOpen((o) => { localStorage.setItem('nav_open', o ? '0' : '1'); return !o; })}
         />
         <main className="app__main">
-          {/* Performance — gocase-produto */}
           <ErrorBoundary key={screen} label={`Erro na tela: ${screen}`}>
+            {/* Geral */}
+            {screen === 'gr_feed' && <Feed />}
+            {screen === 'gr_links' && <CentralLinks />}
+            {/* Performance — gocase-produto */}
             {screen === 'pulso' && <Pulso data={filteredData} />}
             {screen === 'lancamentos' && <Lancamentos data={filteredData} sales={filteredSales} />}
             {screen === 'produto' && <Produto data={filteredData} sales={filteredSales} />}
