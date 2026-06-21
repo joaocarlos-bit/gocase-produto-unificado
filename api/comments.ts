@@ -107,5 +107,34 @@ export default async function handler(request: Request): Promise<Response> {
     }
   }
 
+  if (request.method === 'DELETE') {
+    let body: { id?: unknown };
+    try {
+      body = await request.json();
+    } catch {
+      return json(400, { error: 'Body inválido' });
+    }
+    const id = typeof body.id === 'string' ? body.id.trim() : '';
+    if (!id) return json(400, { error: 'id faltando' });
+    try {
+      // O Apps Script só expõe doGet/doPost → mandamos a ação por POST.
+      // A autorização (só o autor apaga) é feita no script comparando o email
+      // gravado na linha com o email da sessão (que vem do JWT, confiável).
+      const r = await fetch(SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        redirect: 'follow',
+        body: JSON.stringify({ action: 'delete', secret: SCRIPT_SECRET, id, email: session.email }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (j.error === 'forbidden') return json(403, { error: 'Você só pode excluir seus próprios comentários.' });
+      if (j.error === 'not found') return json(404, { error: 'Comentário não encontrado.' });
+      if (!r.ok || j.error) throw new Error(j.error || `Apps Script HTTP ${r.status}`);
+      return json(200, { ok: true, id });
+    } catch (e) {
+      return json(500, { error: 'Falha ao excluir: ' + (e as Error).message });
+    }
+  }
+
   return json(405, { error: 'Método não suportado' });
 }

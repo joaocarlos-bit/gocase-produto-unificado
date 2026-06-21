@@ -63,11 +63,12 @@ function doGet(e) {
   return _json({ comments: out });
 }
 
-// POST { action:'create', secret, email, name, message } → { comment }
+// POST roteia por body.action: 'create' (default) ou 'delete'.
 function doPost(e) {
   var body = {};
   try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); } catch (err) { return _json({ error: 'bad json' }); }
   if (!_checkSecret(body.secret)) return _json({ error: 'unauthorized' });
+  if (body.action === 'delete') return _delete(body);
 
   var message = String(body.message || '').trim();
   if (!message) return _json({ error: 'empty' });
@@ -82,6 +83,35 @@ function doPost(e) {
     var createdAt = new Date().toISOString();
     _sheet().appendRow([id, createdAt, email, name, message]);
     return _json({ comment: { id: id, createdAt: createdAt, email: email, name: name, message: message } });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Exclui um comentário por id. SÓ apaga se o email da linha == email do
+// solicitante (o backend Vercel passa o email vindo do JWT da sessão).
+// POST { action:'delete', secret, id, email } → { ok:true } | { error }
+function _delete(body) {
+  var id = String(body.id || '');
+  var requester = String(body.email || '').trim().toLowerCase();
+  if (!id) return _json({ error: 'empty id' });
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sh = _sheet();
+    var last = sh.getLastRow();
+    if (last < 2) return _json({ error: 'not found' });
+    var ids = sh.getRange(2, 1, last - 1, 1).getValues();    // col A = id
+    var emails = sh.getRange(2, 3, last - 1, 1).getValues();  // col C = email
+    for (var i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === id) {
+        if (String(emails[i][0]).trim().toLowerCase() !== requester) return _json({ error: 'forbidden' });
+        sh.deleteRow(i + 2); // +2: linha 1 = cabeçalho, dados começam na 2
+        return _json({ ok: true, id: id });
+      }
+    }
+    return _json({ error: 'not found' });
   } finally {
     lock.releaseLock();
   }

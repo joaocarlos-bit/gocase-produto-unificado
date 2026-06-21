@@ -108,7 +108,11 @@ function decodeJwtPayload(jwt: string): Record<string, unknown> {
   if (parts.length !== 3) throw new Error('Invalid JWT');
   let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
   b64 += '='.repeat((4 - (b64.length % 4)) % 4);
-  return JSON.parse(atob(b64));
+  // atob devolve uma binary string (Latin-1); decodificar como UTF-8 pra não
+  // estragar acentos no nome (ex.: "João" → "JoÃ£o").
+  const bin = atob(b64);
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  return JSON.parse(new TextDecoder('utf-8').decode(bytes));
 }
 
 function textResponse(status: number, body: string): Response {

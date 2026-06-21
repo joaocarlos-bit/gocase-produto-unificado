@@ -39,6 +39,7 @@ export function Feed() {
   const [draft, setDraft] = useState('');
   const [posting, setPosting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
 
   async function load() {
@@ -82,6 +83,26 @@ export function Feed() {
   function onKeyDown(e: React.KeyboardEvent) {
     // Ctrl/Cmd + Enter envia
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
+  }
+
+  async function remove(id: string) {
+    if (deletingId) return;
+    if (!window.confirm('Excluir este comentário? Esta ação não pode ser desfeita.')) return;
+    setDeletingId(id);
+    try {
+      const r = await fetch('/api/comments', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setComments((cur) => (Array.isArray(cur) ? cur.filter((c) => c.id !== id) : cur));
+    } catch (e) {
+      window.alert('Não foi possível excluir: ' + (e as Error).message);
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   const count = Array.isArray(comments) ? comments.length : 0;
@@ -165,6 +186,7 @@ export function Feed() {
         <div className="feed__list">
           {comments.map((c) => {
             const hue = avatarHue(c.email);
+            const canDelete = !!me && c.email.toLocaleLowerCase() === me.email.toLocaleLowerCase();
             return (
               <div key={c.id} className="feed__item">
                 <div className="feed__avatar" style={{ background: `hsl(${hue} 70% 92%)`, color: `hsl(${hue} 55% 32%)` }}>
@@ -175,6 +197,16 @@ export function Feed() {
                     <span className="feed__author">{c.name || c.email.split('@')[0]}</span>
                     <span className="feed__email">{c.email}</span>
                     <span className="feed__time">{fmtDateTime(c.createdAt)}</span>
+                    {canDelete && (
+                      <button
+                        className="feed__del"
+                        onClick={() => remove(c.id)}
+                        disabled={deletingId === c.id}
+                        title="Excluir meu comentário"
+                      >
+                        {deletingId === c.id ? '…' : '🗑 Excluir'}
+                      </button>
+                    )}
                   </div>
                   <div className="feed__msg">{c.message}</div>
                 </div>
@@ -248,6 +280,15 @@ export function Feed() {
         .feed__author { font-size: 13px; font-weight: 700; color: var(--text); }
         .feed__email { font-size: 11px; color: var(--text-3); }
         .feed__time { font-size: 11px; color: var(--text-3); margin-left: auto; white-space: nowrap; }
+        .feed__del {
+          margin-left: 10px;
+          font-size: 11px; font-weight: 700;
+          color: var(--text-3);
+          background: transparent; border: 1px solid var(--border);
+          border-radius: 6px; padding: 2px 8px; cursor: pointer; white-space: nowrap;
+        }
+        .feed__del:hover:not(:disabled) { color: var(--red); border-color: var(--red); }
+        .feed__del:disabled { opacity: 0.5; cursor: default; }
         .feed__msg { font-size: 14px; color: var(--text-2); line-height: 1.55; margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
       `}</style>
     </div>
