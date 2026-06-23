@@ -10,6 +10,7 @@ import { Waitlists } from './screens/gestao/Waitlists';
 import { LancamentosGestao } from './screens/gestao/LancamentosGestao';
 import { Prazo } from './screens/gestao/Prazo';
 import { Projetos } from './screens/gestao/Projetos';
+import { Relatorios } from './screens/gestao/Relatorios';
 import { Pulso } from './screens/Pulso';
 import { Lancamentos } from './screens/Lancamentos';
 import { Produto } from './screens/Produto';
@@ -134,6 +135,7 @@ export function App() {
             {screen === 'g_waitlists' && <Waitlists />}
             {screen === 'g_prazo' && <Prazo />}
             {screen === 'g_projetos' && <Projetos />}
+            {screen === 'g_relatorios' && <Relatorios />}
             {/* Importação — Controle de Importações */}
             {screen === 'imp_custos' && <HistoricoCustos />}
           </ErrorBoundary>
