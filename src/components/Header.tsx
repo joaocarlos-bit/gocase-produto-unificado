@@ -1,5 +1,6 @@
 import type { CanalGrupo } from '../data/types';
 import { CANAL_GRUPOS } from '../data/types';
+import { OnlinePresence } from './OnlinePresence';
 
 interface Props {
   periodFrom: string;
@@ -51,6 +52,7 @@ export function Header({ periodFrom, periodTo, collectedAt, linhasCount, skusCou
             </button>
           ))}
         </div>
+        <OnlinePresence />
         <span className="hdr__pill">📦 snapshot · {collectedLabel}</span>
       </div>
       <style>{`
