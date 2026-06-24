@@ -78,6 +78,7 @@ export function Waitlists() {
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [reloadKey, setReloadKey] = useState(0);
   const [period, setPeriod] = useState<Period>('todos');
+  const [chartYear, setChartYear] = useState<string>('2026'); // filtro dos gráficos de volume (padrão 2026)
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [wlSearch, setWlSearch] = useState('');
@@ -340,8 +341,7 @@ export function Waitlists() {
     Object.values(firstByProd).forEach((d) => { wlMap[ymOf(d)] = (wlMap[ymOf(d)] || 0) + 1; });
     const toSeries = (m: Record<string, number>) =>
       Object.entries(m).sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([ym, count]) => ({ ym, label: ymLabel(ym), count }))
-        .slice(-18); // últimos 18 meses
+        .map(([ym, count]) => ({ ym, label: ymLabel(ym), count }));
     return { ctr: toSeries(ctrMap), wl: toSeries(wlMap) };
   }, [ready]);
 
@@ -379,6 +379,14 @@ export function Waitlists() {
     { id: '15dias', label: '15 dias' }, { id: '30dias', label: '30 dias' },
   ];
 
+  // Filtro de ano dos gráficos de volume (padrão 2026)
+  const chartYears = Array.from(new Set([...monthly.ctr, ...monthly.wl].map((d) => d.ym.slice(0, 4)))).sort((a, b) => b.localeCompare(a));
+  const filterYear = (s: { ym: string; label: string; count: number }[]) =>
+    chartYear === 'all' ? s.slice(-18) : s.filter((d) => d.ym.startsWith(chartYear + '-'));
+  const ctrChart = filterYear(monthly.ctr);
+  const wlChart = filterYear(monthly.wl);
+  const yearSub = chartYear === 'all' ? 'histórico (últimos 18 meses)' : chartYear;
+
   return (
     <div className="g-wl">
       <div className="g-eng__head">
@@ -397,14 +405,22 @@ export function Waitlists() {
         <KPICard label="Testes de Waitlist" value={fmtNum(products.length)} icon="📋" accent="purple" />
       </div>
 
+      <div className="g-chartbar">
+        <span className="g-chartbar__lbl">Volume mensal · ano</span>
+        {chartYears.map((y) => (
+          <button key={y} className={`g-chip ${chartYear === y ? 'g-chip--on' : ''}`} onClick={() => setChartYear(y)}>{y}</button>
+        ))}
+        <button className={`g-chip ${chartYear === 'all' ? 'g-chip--on' : ''}`} onClick={() => setChartYear('all')}>Tudo</button>
+      </div>
+
       <div className="g-rank2" style={{ marginBottom: 14 }}>
-        <Card title="📈 Volume de Testes de CTR" subtitle="Por mês de criação · histórico (últimos 18 meses)">
+        <Card title="📈 Volume de Testes de CTR" subtitle={`Por mês de criação · ${yearSub}`}>
           <div style={{ height: 240 }}>
-            {monthly.ctr.length === 0 ? (
-              <div className="g-empty">Sem dados de data nos testes de CTR.</div>
+            {ctrChart.length === 0 ? (
+              <div className="g-empty">Sem testes de CTR em {chartYear === 'all' ? 'período' : chartYear}.</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthly.ctr} margin={{ top: 20, right: 12, bottom: 4, left: -10 }}>
+                <BarChart data={ctrChart} margin={{ top: 20, right: 12, bottom: 4, left: -10 }}>
                   <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" tick={{ fill: 'var(--text-3)', fontSize: 11, fontWeight: 600 }} tickLine={false} axisLine={{ stroke: 'var(--border)' }} />
                   <YAxis tick={{ fill: 'var(--text-3)', fontSize: 10 }} width={34} tickLine={false} axisLine={false} allowDecimals={false} />
@@ -418,13 +434,13 @@ export function Waitlists() {
           </div>
         </Card>
 
-        <Card title="📈 Volume de Testes de Waitlist" subtitle="Novos testes por mês (1ª data) · histórico (últimos 18 meses)">
+        <Card title="📈 Volume de Testes de Waitlist" subtitle={`Novos testes por mês (1ª data) · ${yearSub}`}>
           <div style={{ height: 240 }}>
-            {monthly.wl.length === 0 ? (
-              <div className="g-empty">Sem dados de data nas waitlists.</div>
+            {wlChart.length === 0 ? (
+              <div className="g-empty">Sem waitlists em {chartYear === 'all' ? 'período' : chartYear}.</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthly.wl} margin={{ top: 20, right: 12, bottom: 4, left: -10 }}>
+                <BarChart data={wlChart} margin={{ top: 20, right: 12, bottom: 4, left: -10 }}>
                   <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" tick={{ fill: 'var(--text-3)', fontSize: 11, fontWeight: 600 }} tickLine={false} axisLine={{ stroke: 'var(--border)' }} />
                   <YAxis tick={{ fill: 'var(--text-3)', fontSize: 10 }} width={34} tickLine={false} axisLine={false} allowDecimals={false} />
@@ -720,6 +736,8 @@ export function Waitlists() {
         .clr-modal__body > div { width: 100%; }
         .g-img-btn { font-size: 13px; margin-left: 6px; opacity: 0.45; vertical-align: middle; line-height: 1; }
         .g-img-btn:hover { opacity: 1; }
+        .g-chartbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+        .g-chartbar__lbl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-3); margin-right: 4px; }
         .g-wl__period { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
         .g-chip { font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); }
         .g-chip--on { background: var(--brand-blue); border-color: var(--brand-blue); color: #fff; }
