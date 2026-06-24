@@ -20,6 +20,10 @@ const fmtBRL = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency'
 const fmtBRL2 = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
 const fmtNum = (v: number) => v.toLocaleString('pt-BR');
 
+const M_LABELS = ['', 'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+const ymOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const ymLabel = (ym: string) => { const [y, m] = ym.split('-'); return `${M_LABELS[+m]}/${y.slice(2)}`; };
+
 type Row = Record<string, string>;
 type Period = 'todos' | '7dias' | '15dias' | '30dias' | 'range';
 
@@ -319,6 +323,28 @@ export function Waitlists() {
     return null;
   }, [period, fromDate, toDate]);
 
+  // Volume mensal (histórico completo, independente do filtro de período):
+  //   - CTR: nº de testes por mês de "Data de Criação"
+  //   - Waitlist: nº de produtos distintos pelo mês da 1ª "Dia" (novos testes/mês)
+  const monthly = useMemo(() => {
+    if (!ready) return { ctr: [] as { ym: string; label: string; count: number }[], wl: [] as { ym: string; label: string; count: number }[] };
+    const ctrMap: Record<string, number> = {};
+    ready.ctr.forEach((r) => { const d = parseDateBR(r['Data de Criação']); if (d) ctrMap[ymOf(d)] = (ctrMap[ymOf(d)] || 0) + 1; });
+    const firstByProd: Record<string, Date> = {};
+    ready.wl.forEach((r) => {
+      const name = r['Produto']; if (!name) return;
+      const d = parseDateBR(r['Dia']); if (!d) return;
+      if (!firstByProd[name] || d < firstByProd[name]) firstByProd[name] = d;
+    });
+    const wlMap: Record<string, number> = {};
+    Object.values(firstByProd).forEach((d) => { wlMap[ymOf(d)] = (wlMap[ymOf(d)] || 0) + 1; });
+    const toSeries = (m: Record<string, number>) =>
+      Object.entries(m).sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([ym, count]) => ({ ym, label: ymLabel(ym), count }))
+        .slice(-18); // últimos 18 meses
+    return { ctr: toSeries(ctrMap), wl: toSeries(wlMap) };
+  }, [ready]);
+
   if (state.kind === 'loading') return <div className="g-status"><span className="spinner" /> Carregando Waitlists…</div>;
   if (state.kind === 'error') return (
     <div className="g-status g-status--err">⚠ Erro: {state.message}
@@ -369,6 +395,48 @@ export function Waitlists() {
           hint={`WL ${brl(totalCostWL)} · CTR ${brl(totalCostCTR)}`} />
         <KPICard label="Testes de CTR" value={fmtNum(ctrInPeriod.length)} icon="🖱" accent="yellow" />
         <KPICard label="Testes de Waitlist" value={fmtNum(products.length)} icon="📋" accent="purple" />
+      </div>
+
+      <div className="g-rank2" style={{ marginBottom: 14 }}>
+        <Card title="📈 Volume de Testes de CTR" subtitle="Por mês de criação · histórico (últimos 18 meses)">
+          <div style={{ height: 240 }}>
+            {monthly.ctr.length === 0 ? (
+              <div className="g-empty">Sem dados de data nos testes de CTR.</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthly.ctr} margin={{ top: 20, right: 12, bottom: 4, left: -10 }}>
+                  <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: 'var(--text-3)', fontSize: 11, fontWeight: 600 }} tickLine={false} axisLine={{ stroke: 'var(--border)' }} />
+                  <YAxis tick={{ fill: 'var(--text-3)', fontSize: 10 }} width={34} tickLine={false} axisLine={false} allowDecimals={false} />
+                  <Tooltip formatter={(v: number) => [fmtNum(v), 'testes']} contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid var(--border)', fontWeight: 600 }} cursor={{ fill: 'rgba(245,158,11,0.08)' }} />
+                  <Bar dataKey="count" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={46}>
+                    <LabelList dataKey="count" position="top" formatter={(v: number) => (v > 0 ? fmtNum(v) : '')} fill="var(--text)" fontSize={10} fontWeight={700} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </Card>
+
+        <Card title="📈 Volume de Testes de Waitlist" subtitle="Novos testes por mês (1ª data) · histórico (últimos 18 meses)">
+          <div style={{ height: 240 }}>
+            {monthly.wl.length === 0 ? (
+              <div className="g-empty">Sem dados de data nas waitlists.</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthly.wl} margin={{ top: 20, right: 12, bottom: 4, left: -10 }}>
+                  <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: 'var(--text-3)', fontSize: 11, fontWeight: 600 }} tickLine={false} axisLine={{ stroke: 'var(--border)' }} />
+                  <YAxis tick={{ fill: 'var(--text-3)', fontSize: 10 }} width={34} tickLine={false} axisLine={false} allowDecimals={false} />
+                  <Tooltip formatter={(v: number) => [fmtNum(v), 'testes']} contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid var(--border)', fontWeight: 600 }} cursor={{ fill: 'rgba(139,92,246,0.08)' }} />
+                  <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={46}>
+                    <LabelList dataKey="count" position="top" formatter={(v: number) => (v > 0 ? fmtNum(v) : '')} fill="var(--text)" fontSize={10} fontWeight={700} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </Card>
       </div>
 
       <div className="g-rank2">
