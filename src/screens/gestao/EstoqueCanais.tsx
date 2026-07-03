@@ -8,6 +8,7 @@ import { PageHero } from '../../components/PageHero';
 import { KPICard } from '../../components/KPICard';
 import { Card } from '../../components/Card';
 import { Pager, paginate } from '../../components/Pager';
+import { MultiSelect } from '../../components/MultiSelect';
 
 interface StockRow {
   linha: string; item: string; categoria: string; curva: string; status: string; chave: string;
@@ -23,9 +24,9 @@ const raw = (v: string) => (v && v.trim() ? v.trim() : '—');
 // colunas de estoque (numéricas) na ordem pedida
 const STOCK_COLS = [
   { key: 'totalStock', label: 'Total Stock' },
-  { key: 'extrema', label: 'Estoque [Extrema]' },
   { key: 'itapevaTotal', label: 'Itapeva [Total]' },
   { key: 'itapevaB2B', label: 'Itapeva [B2B]' },
+  { key: 'extrema', label: 'Estoque [Extrema]' },
   { key: 'extremaB2B', label: 'Extrema [B2B]' },
 ] as const;
 const INFO_COLS = [
@@ -47,7 +48,7 @@ function DispBadge({ v }: { v: string }) {
 export function EstoqueCanais() {
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [search, setSearch] = useState('');
-  const [skuSel, setSkuSel] = useState('');
+  const [selSkus, setSelSkus] = useState<string[]>([]);
   const [fCat, setFCat] = useState('todos');
   const [fCurva, setFCurva] = useState('todos');
   const [fStatus, setFStatus] = useState('todos');
@@ -84,9 +85,8 @@ export function EstoqueCanais() {
   const filtered = useMemo(() => {
     if (!snap) return [];
     const q = search.trim().toLocaleLowerCase('pt-BR');
-    const sku = skuSel.trim().toLocaleLowerCase('pt-BR');
     const arr = snap.rows.filter((r) =>
-      (sku === '' || r.item.toLocaleLowerCase('pt-BR').includes(sku)) &&
+      (selSkus.length === 0 || selSkus.includes(r.item)) &&
       (fCat === 'todos' || r.categoria === fCat) &&
       (fCurva === 'todos' || r.curva === fCurva) &&
       (fStatus === 'todos' || r.status === fStatus) &&
@@ -101,7 +101,7 @@ export function EstoqueCanais() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return arr;
-  }, [snap, search, skuSel, fCat, fCurva, fStatus, fDisp, sortKey, sortDir]);
+  }, [snap, search, selSkus, fCat, fCurva, fStatus, fDisp, sortKey, sortDir]);
 
   function toggleSort(k: string) {
     if (sortKey === k) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -152,18 +152,9 @@ export function EstoqueCanais() {
       <Card noPadding>
         <div className="ec-bar">
           <input className="ec-input ec-input--search" placeholder="Buscar SKU, linha ou chave…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} />
-          <div className="ec-sku-pick">
-            <input
-              className="ec-input"
-              list="ec-sku-list"
-              placeholder="Selecionar SKU…"
-              value={skuSel}
-              onChange={(e) => { setSkuSel(e.target.value); setPage(0); }}
-            />
-            <datalist id="ec-sku-list">
-              {skuOptions.map((s) => <option key={s} value={s} />)}
-            </datalist>
-            {skuSel && <button className="ec-sku-clear" title="Limpar SKU" onClick={() => { setSkuSel(''); setPage(0); }}>✕</button>}
+          <div className="ec-grp">
+            <span className="ec-grp-lbl">SKU</span>
+            <MultiSelect options={skuOptions} value={selSkus} onChange={(v) => { setSelSkus(v); setPage(0); }} allLabel="Todos" placeholder="Selecionar SKU" />
           </div>
           <select className="ec-input" value={fCat} onChange={(e) => { setFCat(e.target.value); setPage(0); }}>
             <option value="todos">Categoria: todas</option>{opts.cat.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -203,14 +194,12 @@ export function EstoqueCanais() {
                   <td className="c ec-mut">{raw(r.curva)}</td>
                   <td className="ec-mut">{raw(r.status)}</td>
                   <td><DispBadge v={r.disponibilidade} /></td>
-                  <td className="c ec-strong">{fmtN(r.totalStock)}</td>
-                  <td className="c">{fmtN(r.extrema)}</td>
-                  <td className="c">{fmtN(r.itapevaTotal)}</td>
-                  <td className="c">{fmtN(r.itapevaB2B)}</td>
-                  <td className="c">{fmtN(r.extremaB2B)}</td>
-                  <td className="c ec-mut">{raw(r.ruptura)}</td>
-                  <td className="c ec-mut">{raw(r.followUp)}</td>
-                  <td className="c ec-mut">{raw(r.pls)}</td>
+                  {STOCK_COLS.map((c, ci) => (
+                    <td key={c.key} className={`c ${ci === 0 ? 'ec-strong' : ''}`}>{fmtN((r as any)[c.key])}</td>
+                  ))}
+                  {INFO_COLS.map((c) => (
+                    <td key={c.key} className="c ec-mut">{raw((r as any)[c.key])}</td>
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -224,10 +213,8 @@ export function EstoqueCanais() {
         .ec-input { font-size: 12px; padding: 7px 10px; border-radius: 7px; border: 1.5px solid var(--border); background: var(--surface); color: var(--text); outline: none; font-family: var(--font-sans); }
         .ec-input:focus { border-color: var(--brand-blue); }
         .ec-input--search { flex: 1; min-width: 200px; }
-        .ec-sku-pick { position: relative; display: inline-flex; align-items: center; }
-        .ec-sku-pick .ec-input { min-width: 200px; padding-right: 26px; }
-        .ec-sku-clear { position: absolute; right: 6px; border: none; background: transparent; color: var(--text-3); font-size: 12px; cursor: pointer; padding: 2px 4px; }
-        .ec-sku-clear:hover { color: var(--red); }
+        .ec-grp { display: inline-flex; align-items: center; gap: 6px; }
+        .ec-grp-lbl { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; }
         .ec-tablewrap { overflow-x: auto; }
         .ec-table { width: 100%; border-collapse: collapse; font-size: 12px; }
         .ec-table th { text-align: left; padding: 10px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-3); border-bottom: 1.5px solid var(--border); white-space: nowrap; position: sticky; top: 0; background: var(--surface); z-index: 1; }
