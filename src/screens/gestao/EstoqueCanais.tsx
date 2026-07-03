@@ -47,6 +47,7 @@ function DispBadge({ v }: { v: string }) {
 export function EstoqueCanais() {
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [search, setSearch] = useState('');
+  const [skuSel, setSkuSel] = useState('');
   const [fCat, setFCat] = useState('todos');
   const [fCurva, setFCurva] = useState('todos');
   const [fStatus, setFStatus] = useState('todos');
@@ -75,10 +76,17 @@ export function EstoqueCanais() {
     };
   }, [snap]);
 
+  const skuOptions = useMemo(
+    () => Array.from(new Set((snap?.rows || []).map((r) => r.item).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR')),
+    [snap],
+  );
+
   const filtered = useMemo(() => {
     if (!snap) return [];
     const q = search.trim().toLocaleLowerCase('pt-BR');
+    const sku = skuSel.trim().toLocaleLowerCase('pt-BR');
     const arr = snap.rows.filter((r) =>
+      (sku === '' || r.item.toLocaleLowerCase('pt-BR').includes(sku)) &&
       (fCat === 'todos' || r.categoria === fCat) &&
       (fCurva === 'todos' || r.curva === fCurva) &&
       (fStatus === 'todos' || r.status === fStatus) &&
@@ -93,7 +101,7 @@ export function EstoqueCanais() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return arr;
-  }, [snap, search, fCat, fCurva, fStatus, fDisp, sortKey, sortDir]);
+  }, [snap, search, skuSel, fCat, fCurva, fStatus, fDisp, sortKey, sortDir]);
 
   function toggleSort(k: string) {
     if (sortKey === k) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -129,7 +137,7 @@ export function EstoqueCanais() {
   return (
     <div className="ec">
       <PageHero
-        breadcrumb="Gestão · Estoque por Canais"
+        breadcrumb="Produto Gocase · Estoque · Por Canais"
         title="Estoque por Canais"
         subtitle={`Posição de estoque por SKU e local/canal (Itapeva, Extrema, B2B) · ${snap!.meta.count} SKUs · snapshot ${coletadoLbl}`}
       />
@@ -144,6 +152,19 @@ export function EstoqueCanais() {
       <Card noPadding>
         <div className="ec-bar">
           <input className="ec-input ec-input--search" placeholder="Buscar SKU, linha ou chave…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} />
+          <div className="ec-sku-pick">
+            <input
+              className="ec-input"
+              list="ec-sku-list"
+              placeholder="Selecionar SKU…"
+              value={skuSel}
+              onChange={(e) => { setSkuSel(e.target.value); setPage(0); }}
+            />
+            <datalist id="ec-sku-list">
+              {skuOptions.map((s) => <option key={s} value={s} />)}
+            </datalist>
+            {skuSel && <button className="ec-sku-clear" title="Limpar SKU" onClick={() => { setSkuSel(''); setPage(0); }}>✕</button>}
+          </div>
           <select className="ec-input" value={fCat} onChange={(e) => { setFCat(e.target.value); setPage(0); }}>
             <option value="todos">Categoria: todas</option>{opts.cat.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
@@ -202,10 +223,19 @@ export function EstoqueCanais() {
         .ec-bar { display: flex; gap: 8px; padding: 12px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
         .ec-input { font-size: 12px; padding: 7px 10px; border-radius: 7px; border: 1.5px solid var(--border); background: var(--surface); color: var(--text); outline: none; font-family: var(--font-sans); }
         .ec-input:focus { border-color: var(--brand-blue); }
-        .ec-input--search { flex: 1; min-width: 220px; }
+        .ec-input--search { flex: 1; min-width: 200px; }
+        .ec-sku-pick { position: relative; display: inline-flex; align-items: center; }
+        .ec-sku-pick .ec-input { min-width: 200px; padding-right: 26px; }
+        .ec-sku-clear { position: absolute; right: 6px; border: none; background: transparent; color: var(--text-3); font-size: 12px; cursor: pointer; padding: 2px 4px; }
+        .ec-sku-clear:hover { color: var(--red); }
         .ec-tablewrap { overflow-x: auto; }
         .ec-table { width: 100%; border-collapse: collapse; font-size: 12px; }
         .ec-table th { text-align: left; padding: 10px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-3); border-bottom: 1.5px solid var(--border); white-space: nowrap; position: sticky; top: 0; background: var(--surface); z-index: 1; }
+        /* Coluna SKU congelada (1ª coluna) */
+        .ec-table th:first-child, .ec-table td:first-child { position: sticky; left: 0; background: var(--surface); box-shadow: 1px 0 0 var(--border); }
+        .ec-table td:first-child { z-index: 1; }
+        .ec-table th:first-child { z-index: 3; }
+        .ec-table tr:hover td:first-child { background: var(--surface-2); }
         .ec-table th.c, .ec-table td.c { text-align: center; }
         .ec-th--sort { cursor: pointer; user-select: none; }
         .ec-th--sort:hover { color: var(--brand-blue); }

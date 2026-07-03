@@ -11,10 +11,12 @@ import { PageHero } from '../components/PageHero';
 import { ABCGiroMatrix } from '../components/ABCGiroMatrix';
 import { EstoqueTable } from '../components/EstoqueTable';
 import { MultiSelect } from '../components/MultiSelect';
+import { EstoqueCanais } from './gestao/EstoqueCanais';
 
 interface Props { data: ProcessedData; }
 
 export function Estoque({ data }: Props) {
+  const [subTab, setSubTab] = useState<'geral' | 'canais'>('geral');
   const allRows = useMemo(() => buildEstoqueRows(data), [data]);
 
   const [filterCats, setFilterCats] = useState<string[]>([]);
@@ -71,6 +73,12 @@ export function Estoque({ data }: Props) {
 
   return (
     <div className="estoque">
+      <div className="est-subtabs">
+        <button className={`est-subtab ${subTab === 'geral' ? 'on' : ''}`} onClick={() => setSubTab('geral')}>Visão Geral</button>
+        <button className={`est-subtab ${subTab === 'canais' ? 'on' : ''}`} onClick={() => setSubTab('canais')}>Por Canais</button>
+      </div>
+
+      {subTab === 'canais' ? <EstoqueCanais /> : (<>
       <PageHero
         breadcrumb="Unidade de negócio: Produto Gocase · Estoque"
         title="Estoque"
@@ -293,6 +301,18 @@ export function Estoque({ data }: Props) {
           color: var(--brand-blue);
           font-weight: 700;
         }
+      `}</style>
+      </>)}
+
+      <style>{`
+        .est-subtabs { display: flex; gap: 6px; margin-bottom: 18px; border-bottom: 1.5px solid var(--border); }
+        .est-subtab {
+          padding: 9px 16px; font-size: 13px; font-weight: 700;
+          color: var(--text-3); background: transparent; border: none;
+          border-bottom: 2.5px solid transparent; margin-bottom: -1.5px; cursor: pointer;
+        }
+        .est-subtab:hover { color: var(--text); }
+        .est-subtab.on { color: var(--brand-blue); border-bottom-color: var(--brand-blue); }
       `}</style>
     </div>
   );

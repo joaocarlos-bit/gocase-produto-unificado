@@ -9,7 +9,7 @@ export type ScreenId =
   // Performance (gocase-produto)
   | 'pulso' | 'lancamentos' | 'produto' | 'portfolio' | 'estoque' | 'canais' | 'clientes' | 'roadmap'
   // Gestão (dash-produto) — prefixo g_ pra não colidir com 'lancamentos' do Performance
-  | 'g_engenharia' | 'g_lancamentos' | 'g_waitlists' | 'g_prazo' | 'g_projetos' | 'g_relatorios' | 'g_estoque_canais'
+  | 'g_engenharia' | 'g_lancamentos' | 'g_waitlists' | 'g_prazo' | 'g_projetos' | 'g_relatorios'
   // Importação (Controle de Importações) — prefixo imp_
   | 'imp_custos';
 
@@ -50,7 +50,6 @@ export const SECTIONS: NavSection[] = [
       { id: 'g_prazo',      label: 'Prazo dos pedidos',     ready: true },
       { id: 'g_projetos',   label: 'Projetos',              ready: true },
       { id: 'g_relatorios', label: 'Relatórios',            ready: true },
-      { id: 'g_estoque_canais', label: 'Estoque por Canais', ready: true },
     ],
   },
   {
