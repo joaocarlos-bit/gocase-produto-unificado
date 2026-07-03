@@ -196,6 +196,9 @@ export const GESTAO_CONFIG = {
     lancamentos: '1F0NNA-T5Vscc_AmIeh2tQkvKAdsmPjrHMLldzUznRi8',
     sales: '1mHnQXMOLom4QPQ9dZOUi48XCbK9rU-LSEJWKVTpevPQ',
     engenhariaGid: 975326169,
+    // Estoque por canais/locais (por SKU). Cabeçalho de 3 linhas mescladas →
+    // ler por índice de coluna (ver COLS em EstoqueCanais.tsx).
+    estoqueCanais: { sheetId: '1FdmE1CvAusXk3DwjfhyKZ8acF1xLzczlzhaPH3-ack8', gid: 1542625543 },
   },
 };
 
