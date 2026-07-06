@@ -7,11 +7,34 @@ import { useEffect, useMemo, useState } from 'react';
 import { TokenPrompt } from '../../components/TokenPrompt';
 import {
   MONDAY, getMondayToken, fetchPortfolio, isAIGroup, projStatusBadge, subStatusBadge,
-  getSubStatus, getSubDate, formatSubDate, progressFromStatus, progressFromSubitems, extractObjetivo,
+  getSubStatus, getSubDate, formatSubDate, progressFromStatus, progressFromSubitems, parseNotesSections,
   fetchItemUpdates, parseUpdates, getSubDateColumnInfo, updateSubitemName, updateSubitemDate, fetchSubitemBoardId,
   getSubStatusColumnInfo, updateSubitemStatus,
-  type MondayItem, type MondaySubitem, type UpdImage,
+  type MondayItem, type MondaySubitem, type UpdImage, type GainsTable,
 } from '../../data/monday';
+
+/** Chip de aviso para campos ainda não preenchidos no Monday.com. */
+function Flag({ children }: { children: string }) {
+  return <span className="pj-flag">⚠ {children}</span>;
+}
+
+const SUMMARY_LEN = 200;
+
+/** Texto de seção resumido por padrão (corta no fim de palavra + "…"), com
+ *  toggle "Ver mais/Ver menos" quando o conteúdo passa do limite. */
+function ExpandableText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  if (text.length <= SUMMARY_LEN) return <div className="pj-text">{text}</div>;
+  const cut = text.slice(0, SUMMARY_LEN);
+  const lastSpace = cut.lastIndexOf(' ');
+  const summary = (lastSpace > 100 ? cut.slice(0, lastSpace) : cut).trimEnd() + '…';
+  return (
+    <div className="pj-text">
+      {open ? text : summary}
+      <button type="button" className="pj-more" onClick={() => setOpen((o) => !o)}>{open ? 'Ver menos' : 'Ver mais'}</button>
+    </div>
+  );
+}
 
 type Filter = 'ativos' | 'nao-iniciado' | 'pausado' | 'todos';
 type SubTab = 'projetos' | 'ia';
@@ -41,7 +64,7 @@ export function Projetos() {
   const [subTab, setSubTab] = useState<SubTab>('projetos');
   const [filter, setFilter] = useState<Filter>('ativos');
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const [upd, setUpd] = useState<Record<string, { loading: boolean; statusAtual: string | null; proximos: string[]; ganhos: string[]; objetivo: string | null; richHtml: string | null; images: UpdImage[] }>>({});
+  const [upd, setUpd] = useState<Record<string, { loading: boolean; statusAtual: string | null; proximos: string[]; ganhos: string[]; objetivo: string | null; justificativa: string | null; stakeholders: string | null; premissas: string | null; gainsTable: GainsTable | null; images: UpdImage[] }>>({});
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [commentsVer, setCommentsVer] = useState(0);
   const [editingSub, setEditingSub] = useState<Record<string, { name: string; date: string; status: string } | null>>({});
@@ -102,10 +125,10 @@ export function Projetos() {
       const opening = !n.has(id);
       if (opening) n.add(id); else n.delete(id);
       if (opening && !upd[id]) {
-        setUpd((u) => ({ ...u, [id]: { loading: true, statusAtual: null, proximos: [], ganhos: [], objetivo: null, richHtml: null, images: [] } }));
+        setUpd((u) => ({ ...u, [id]: { loading: true, statusAtual: null, proximos: [], ganhos: [], objetivo: null, justificativa: null, stakeholders: null, premissas: null, gainsTable: null, images: [] } }));
         fetchItemUpdates(getMondayToken(), id)
-          .then((ups) => { const p = parseUpdates(ups); setUpd((u) => ({ ...u, [id]: { loading: false, statusAtual: p.statusAtual, proximos: p.proximos, ganhos: p.ganhos, objetivo: p.objetivo, richHtml: p.richHtml, images: p.images } })); })
-          .catch(() => setUpd((u) => ({ ...u, [id]: { loading: false, statusAtual: null, proximos: [], ganhos: [], objetivo: null, richHtml: null, images: [] } })));
+          .then((ups) => { const p = parseUpdates(ups); setUpd((u) => ({ ...u, [id]: { loading: false, statusAtual: p.statusAtual, proximos: p.proximos, ganhos: p.ganhos, objetivo: p.objetivo, justificativa: p.justificativa, stakeholders: p.stakeholders, premissas: p.premissas, gainsTable: p.gainsTable, images: p.images } })); })
+          .catch(() => setUpd((u) => ({ ...u, [id]: { loading: false, statusAtual: null, proximos: [], ganhos: [], objetivo: null, justificativa: null, stakeholders: null, premissas: null, gainsTable: null, images: [] } })));
       }
       return n;
     });
@@ -214,7 +237,7 @@ export function Projetos() {
             const status = cv[C.status] || 'Não iniciado';
             const risco = cv[C.color] || null;
             const owner = cv[C.owner] || '—';
-            const objetivo = extractObjetivo(cv[C.notes]);
+            const notes = parseNotesSections(cv[C.notes]);
             const badge = projStatusBadge(status);
             const subs = item.subitems || [];
             const isOpen = open.has(item.id);
@@ -236,12 +259,40 @@ export function Projetos() {
                 </button>
                 {isOpen && (
                   <div className="pj-card__body">
-                    <div className="pj-grid">
-                      <div>
+                    <div className="pj-flow">
+                      <div className="pj-flow__col">
                         <div className="pj-lbl">Objetivo</div>
-                        {objetivo || u?.objetivo
-                          ? <div className="pj-text">{objetivo || u?.objetivo}</div>
-                          : <div className="pj-pending">{!u || u.loading ? '…' : 'Objetivo não cadastrado no Monday.com'}</div>}
+                        {notes.objetivo || u?.objetivo
+                          ? <ExpandableText text={notes.objetivo || u?.objetivo || ''} />
+                          : (!u || u.loading ? <div className="pj-pending">…</div> : <Flag>Objetivo não cadastrado no Monday.com</Flag>)}
+
+                        <div className="pj-lbl">Justificativa</div>
+                        {notes.justificativa || u?.justificativa
+                          ? <ExpandableText text={notes.justificativa || u?.justificativa || ''} />
+                          : (!u || u.loading ? <div className="pj-pending">…</div> : <Flag>Justificativa não cadastrada no Monday.com</Flag>)}
+
+                        <div className="pj-lbl">Stakeholders</div>
+                        {notes.stakeholders || u?.stakeholders
+                          ? <ExpandableText text={notes.stakeholders || u?.stakeholders || ''} />
+                          : (!u || u.loading ? <div className="pj-pending">…</div> : <Flag>Stakeholders não cadastrados no Monday.com</Flag>)}
+
+                        <div className="pj-lbl">Premissas</div>
+                        {notes.premissas || u?.premissas
+                          ? <ExpandableText text={notes.premissas || u?.premissas || ''} />
+                          : (!u || u.loading ? <div className="pj-pending">…</div> : <Flag>Premissas não cadastradas no Monday.com</Flag>)}
+                      </div>
+
+                      <div className="pj-flow__col">
+                        <div className="pj-lbl">Status Atual</div>
+                        {!u || u.loading ? <div className="pj-pending"><span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Carregando…</div>
+                          : u.statusAtual ? <div className="pj-text pj-statusbox">{u.statusAtual}</div>
+                          : <Flag>Nenhuma atualização de status registrada</Flag>}
+
+                        <div className="pj-lbl">Próximos Passos</div>
+                        {!u || u.loading ? <div className="pj-pending">…</div>
+                          : u.proximos.length ? <ul className="pj-next">{u.proximos.map((p, i) => <li key={i}>{p}</li>)}</ul>
+                          : <Flag>Próximos passos não cadastrados</Flag>}
+
                         <div className="pj-lbl">Cronograma de Marcos</div>
                         {subs.length > 0 ? (
                           <div className="pj-subs">
@@ -285,28 +336,40 @@ export function Projetos() {
                               );
                             })}
                           </div>
-                        ) : <div className="pj-pending">Nenhum marco no EAP.</div>}
-                      </div>
-                      <div>
-                        <div className="pj-lbl">Status Atual</div>
-                        {!u || u.loading ? <div className="pj-pending"><span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Carregando…</div>
-                          : u.statusAtual ? <div className="pj-text pj-statusbox">{u.statusAtual}</div>
-                          : <div className="pj-pending">Nenhuma atualização registrada.</div>}
-                        <div className="pj-lbl">Próximos Passos</div>
-                        {!u || u.loading ? <div className="pj-pending">…</div>
-                          : u.proximos.length ? <ul className="pj-next">{u.proximos.map((p, i) => <li key={i}>{p}</li>)}</ul>
-                          : <div className="pj-pending">—</div>}
+                        ) : <Flag>Nenhum marco cadastrado no EAP</Flag>}
                       </div>
                     </div>
 
-                    {u && !u.loading && (u.richHtml || u.ganhos.length > 0) && (
-                      <>
-                        <div className="pj-lbl">Ganhos em Tempo</div>
-                        {u.richHtml
-                          ? <div className="pj-rich" dangerouslySetInnerHTML={{ __html: u.richHtml }} />
-                          : <ul className="pj-next">{u.ganhos.map((g, i) => <li key={i}>{g}</li>)}</ul>}
-                      </>
-                    )}
+                    <div className="pj-gains">
+                      <div className="pj-gains__hd">📈 Ganhos do Projeto</div>
+                      {!u || u.loading ? (
+                        <div className="pj-pending">…</div>
+                      ) : u.gainsTable ? (
+                        <div className="pj-gains__grid">
+                          {u.gainsTable.rows.map((r, i) => (
+                            <div key={i} className="pj-gains__card">
+                              <div className="pj-gains__label">{r.label}</div>
+                              {(r.before || r.after) && (
+                                <div className="pj-gains__ba">
+                                  {r.before && <span>{r.before}</span>}
+                                  <span className="pj-gains__arrow">→</span>
+                                  {r.after && <span>{r.after}</span>}
+                                </div>
+                              )}
+                              {r.amount && <div className="pj-gains__amount">{r.amount}</div>}
+                            </div>
+                          ))}
+                        </div>
+                      ) : u.ganhos.length > 0 ? (
+                        <div className="pj-gains__grid">
+                          {u.ganhos.map((g, i) => (
+                            <div key={i} className="pj-gains__card pj-gains__card--flat"><span className="pj-gains__ic">✓</span>{g}</div>
+                          ))}
+                        </div>
+                      ) : (
+                        <Flag>Ganhos do projeto não cadastrados no Monday.com</Flag>
+                      )}
+                    </div>
 
                     {u && !u.loading && u.images.length > 0 && (
                       <>
@@ -366,23 +429,29 @@ export function Projetos() {
         .pj-prog__fill { display: block; height: 100%; background: var(--brand-blue); }
         .pj-owner { font-size: 11px; font-weight: 600; color: var(--text-2); min-width: 80px; text-align: right; flex: 1; }
         .pj-card__body { padding: 12px 16px 16px 40px; border-top: 1px solid var(--border); }
-        .pj-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-        @media (max-width: 800px) { .pj-grid { grid-template-columns: 1fr; } }
-        .pj-lbl { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; color: var(--brand-blue); margin: 14px 0 6px; }
-        .pj-lbl:first-child { margin-top: 0; }
+        .pj-flow { display: grid; grid-template-columns: 1fr 1fr; gap: 0 32px; }
+        @media (max-width: 800px) { .pj-flow { grid-template-columns: 1fr; } }
+        .pj-flow__col > .pj-lbl:first-child { margin-top: 0; }
+        .pj-lbl { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; color: var(--brand-blue); margin: 14px 0 6px; }
         .pj-text { font-size: 13px; color: var(--text); line-height: 1.5; white-space: pre-line; }
+        .pj-more { border: none; background: none; padding: 0; margin-left: 4px; font-size: 12px; font-weight: 700; color: var(--brand-blue); cursor: pointer; white-space: nowrap; }
+        .pj-more:hover { text-decoration: underline; }
         .pj-statusbox { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; }
         .pj-pending { font-size: 12px; color: var(--text-3); font-style: italic; }
+        .pj-flag { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: var(--amber); background: var(--amber-l); padding: 4px 10px; border-radius: 999px; }
         .pj-next { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text); line-height: 1.6; }
+        .pj-gains { margin-top: 20px; padding: 16px; border-radius: 12px; background: linear-gradient(135deg, var(--green-l), var(--surface-2)); border: 1px solid var(--border); }
+        .pj-gains__hd { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; color: var(--green); margin-bottom: 10px; }
+        .pj-gains__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+        .pj-gains__card { font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; line-height: 1.4; }
+        .pj-gains__card--flat { display: flex; align-items: flex-start; gap: 8px; }
+        .pj-gains__ic { flex: 0 0 auto; width: 18px; height: 18px; border-radius: 50%; background: var(--green-l); color: var(--green); font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
         .pj-imgs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
         .pj-imgs img { height: 140px; max-width: 280px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
-        .pj-rich { font-size: 13px; color: var(--text); line-height: 1.5; overflow-x: auto; }
-        .pj-rich table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
-        .pj-rich th, .pj-rich td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
-        .pj-rich thead th { background: var(--surface-2); font-weight: 700; }
-        .pj-rich h1, .pj-rich h2, .pj-rich h3 { font-size: 13px; font-weight: 800; margin: 10px 0 4px; }
-        .pj-rich p { margin: 4px 0; }
-        .pj-rich img { max-width: 100%; border-radius: 6px; }
+        .pj-gains__label { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+        .pj-gains__ba { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
+        .pj-gains__arrow { color: var(--text-3); }
+        .pj-gains__amount { display: inline-block; font-size: 12px; font-weight: 800; color: var(--green); background: var(--green-l); padding: 3px 10px; border-radius: 999px; }
         .pj-sub__date { font-size: 10px; color: var(--text-3); white-space: nowrap; }
         .pj-sub__date--late { color: var(--red); font-weight: 700; }
         .pj-comments { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }

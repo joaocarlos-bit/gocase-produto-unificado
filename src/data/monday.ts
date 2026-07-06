@@ -366,14 +366,43 @@ export function progressFromSubitems(subs: MondaySubitem[]): number | null {
   return Math.round((done / subs.length) * 100);
 }
 
-/** Limpa o texto de Objetivo (coluna notes), cortando divisores "--- Seção ---". */
-export function extractObjetivo(raw: string | null): string | null {
-  if (!raw) return null;
-  let text = raw.replace(/^[-–\s]+/, '').trim();
-  const idx = text.search(/-{3,}\s*[A-Za-zÀ-ú]/);
-  if (idx > 0) text = text.substring(0, idx).trim();
-  text = text.replace(/[-–\s]+$/, '').trim();
-  return text.length > 10 ? text : null;
+export interface NotesSections { objetivo: string | null; justificativa: string | null; stakeholders: string | null; premissas: string | null; }
+
+const normHeader = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim().replace(/:$/, '').replace(/\s+/g, '_');
+const DIVIDER_LINE = /^[\s]*[-–—_]{3,}[\s]*$/;
+const KNOWN_HEADERS: Record<string, keyof NotesSections> = {
+  objetivo: 'objetivo',
+  justificativa: 'justificativa',
+  stakeholders: 'stakeholders', stakeholder: 'stakeholders',
+  premissas: 'premissas', premissa: 'premissas',
+};
+
+/** Divide o texto de notas do Monday em seções (Objetivo, Justificativa, Stakeholders,
+ *  Premissas). Um cabeçalho é qualquer linha cujo texto seja só um desses nomes — os
+ *  divisores decorativos ("---", "───" etc.) que aparecem antes/depois/entre eles, com
+ *  ou sem par correspondente, são descartados por completo, não só quando "bem-formados".
+ *  Conteúdo antes do primeiro cabeçalho reconhecido (formato legado) vira Objetivo. */
+export function parseNotesSections(raw: string | null): NotesSections {
+  const empty: NotesSections = { objetivo: null, justificativa: null, stakeholders: null, premissas: null };
+  if (!raw) return empty;
+  const lines = raw.trim().split('\n');
+  const sections: Partial<Record<keyof NotesSections, string[]>> = {};
+  let cur: keyof NotesSections | null = null;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (DIVIDER_LINE.test(trimmed)) continue;
+    const known = KNOWN_HEADERS[normHeader(trimmed)];
+    if (known) { cur = known; sections[cur] ||= []; continue; }
+    if (cur === null) cur = 'objetivo';
+    (sections[cur] ||= []).push(line);
+  }
+  const clean = (arr?: string[]) => (arr ? arr.join('\n').replace(/\n{3,}/g, '\n\n').trim() : '');
+  return {
+    objetivo: clean(sections.objetivo) || null,
+    justificativa: clean(sections.justificativa) || null,
+    stakeholders: clean(sections.stakeholders) || null,
+    premissas: clean(sections.premissas) || null,
+  };
 }
 
 export interface UpdImage { url: string; name: string; }
@@ -398,55 +427,84 @@ export async function fetchItemUpdates(token: string, itemId: string): Promise<I
     .sort((a: ItemUpdate, b: ItemUpdate) => b.ts - a.ts);
 }
 
-/** Remove <script>/<style>, atributos on* e src/href não-https de um HTML do Monday. */
-export function sanitizeHtml(html: string): string {
-  return (html || '')
-    .replace(/<\s*(script|style)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
-    .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
-    .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
-    // Remove src/href que não sejam https:// — evita erros de file:// ao rodar como HTML local
-    .replace(/\s(src|href)\s*=\s*"(?!https?:\/\/)[^"]*"/gi, '')
-    .replace(/\s(src|href)\s*=\s*'(?!https?:\/\/)[^']*'/gi, '');
+export interface GainRow { label: string; before: string | null; after: string | null; amount: string | null; }
+export interface GainsTable { rows: GainRow[]; }
+
+const GAIN_HEADER_RE = /antes|depois|economi|ganho/i;
+
+/** Acha, dentre as tabelas de um HTML de update, a que representa ganhos
+ *  (cabeçalho com Antes/Depois/Economia/Ganho) — ignora outras tabelas do
+ *  mesmo comentário (ex: "Escopo" com colunas Módulo/O que cobre). */
+export function extractGainsTable(html: string): GainsTable | null {
+  if (!html || !/<table/i.test(html)) return null;
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  for (const table of Array.from(doc.querySelectorAll('table'))) {
+    const headerRow = table.querySelector('tr');
+    if (!headerRow) continue;
+    const headers = Array.from(headerRow.querySelectorAll('th,td')).map((c) => (c.textContent || '').trim());
+    if (!headers.some((h) => GAIN_HEADER_RE.test(h))) continue;
+    const idxAntes = headers.findIndex((h) => /antes/i.test(h));
+    const idxDepois = headers.findIndex((h) => /depois/i.test(h));
+    const idxGanho = headers.findIndex((h) => /economi|ganho/i.test(h));
+    const bodyRows = Array.from(table.querySelectorAll('tr')).slice(1);
+    const rows: GainRow[] = bodyRows
+      .map((tr) => Array.from(tr.querySelectorAll('td,th')).map((c) => (c.textContent || '').trim()))
+      .filter((cells) => cells.some((c) => c))
+      .map((cells) => ({
+        label: cells[0] || '',
+        before: idxAntes > 0 ? cells[idxAntes] || null : null,
+        after: idxDepois > 0 ? cells[idxDepois] || null : null,
+        amount: idxGanho > 0 ? cells[idxGanho] || null : (cells.length > 1 ? cells[cells.length - 1] : null),
+      }));
+    if (rows.length) return { rows };
+  }
+  return null;
 }
 
 function splitSections(text: string): Record<string, string> {
-  const KNOWN = ['status\\s+atual', 'próximos?\\s*passos?', 'objetivo', 'ganhos?(?:\\s+em\\s+tempo)?', 'okrs?\\s+vinculados?', 'riscos?'];
+  const KNOWN = ['status\\s+atual', 'próximos?\\s*passos?', 'objetivo', 'justificativa', 'stakeholders?', 'premissas?', 'ganhos?(?:\\s+em\\s+tempo)?', 'okrs?\\s+vinculados?', 'riscos?'];
   const re = new RegExp(`^(${KNOWN.join('|')})\\s*:?\\s*(.*)$`, 'i');
   const lines = text.split('\n');
   const sections: Record<string, string> = {};
   let cur: string | null = null; let buf: string[] = [];
   for (const line of lines) {
-    const m = re.exec(line.trim());
+    const trimmed = line.trim();
+    if (DIVIDER_LINE.test(trimmed)) continue;
+    const m = re.exec(trimmed);
     if (m) {
-      if (cur !== null) sections[cur] = buf.join('\n').trim();
+      if (cur !== null) sections[cur] = buf.join('\n').replace(/\n{3,}/g, '\n\n').trim();
       cur = m[1].trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s*:$/, '').replace(/\s+/g, '_');
       buf = m[2]?.trim() ? [m[2].trim()] : [];
     } else if (cur !== null) buf.push(line);
   }
-  if (cur !== null) sections[cur] = buf.join('\n').trim();
+  if (cur !== null) sections[cur] = buf.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   return sections;
 }
 function parseBullets(text: string): string[] {
   return (text || '').split('\n').map((l) => l.replace(/^[\s\-–•*●\d.)]+/, '').trim()).filter((l) => l.length > 3).slice(0, 10);
 }
 
-export interface ParsedUpdates { statusAtual: string | null; proximos: string[]; ganhos: string[]; objetivo: string | null; richHtml: string | null; images: UpdImage[]; latestTs: number; }
+export interface ParsedUpdates {
+  statusAtual: string | null; proximos: string[]; ganhos: string[]; objetivo: string | null;
+  justificativa: string | null; stakeholders: string | null; premissas: string | null;
+  gainsTable: GainsTable | null; images: UpdImage[]; latestTs: number;
+}
 
-/** Extrai Status Atual + Próximos Passos + Ganhos + Objetivo + tabelas HTML + imagens. */
+/** Extrai Status Atual + Próximos Passos + Ganhos + Objetivo/Justificativa/Stakeholders/Premissas + tabela de ganhos + imagens. */
 export function parseUpdates(updates: ItemUpdate[]): ParsedUpdates {
   let statusAtual: string | null = null;
   let proximos: string[] = [];
   let ganhos: string[] = [];
   let objetivo: string | null = null;
-  let richHtml: string | null = null;
+  let justificativa: string | null = null;
+  let stakeholders: string | null = null;
+  let premissas: string | null = null;
+  let gainsTable: GainsTable | null = null;
   const images: UpdImage[] = [];
   let latestTs = 0;
   for (const upd of updates) {
     upd.images.forEach((im) => images.push(im));
-    // body HTML com tabela (ganhos/escopo/economia) — preserva o conteúdo tabular
-    if (!richHtml && /<table/i.test(upd.body) && /ganho|economi|escopo|antes|depois|m[oó]dulo|atividade/i.test(upd.body)) {
-      richHtml = sanitizeHtml(upd.body);
-    }
+    if (!gainsTable) gainsTable = extractGainsTable(upd.body);
     const text = upd.text;
     if (!text || text.replace(/[|\-\s]/g, '').length < 10) continue;
     const sec = splitSections(text);
@@ -468,6 +526,18 @@ export function parseUpdates(updates: ItemUpdate[]): ParsedUpdates {
       const ok = keys.find((k) => /objetivo|escopo/.test(k));
       if (ok && sec[ok].length > 8) objetivo = sec[ok].substring(0, 500);
     }
+    if (!justificativa) {
+      const jk = keys.find((k) => /justificativa/.test(k));
+      if (jk && sec[jk].length > 8) justificativa = sec[jk].substring(0, 800);
+    }
+    if (!stakeholders) {
+      const stk = keys.find((k) => /stakeholders?/.test(k));
+      if (stk && sec[stk].length > 2) stakeholders = sec[stk].substring(0, 800);
+    }
+    if (!premissas) {
+      const pmk = keys.find((k) => /premissas?/.test(k));
+      if (pmk && sec[pmk].length > 2) premissas = sec[pmk].substring(0, 800);
+    }
   }
-  return { statusAtual, proximos, ganhos, objetivo, richHtml, images, latestTs };
+  return { statusAtual, proximos, ganhos, objetivo, justificativa, stakeholders, premissas, gainsTable, images, latestTs };
 }
