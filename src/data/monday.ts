@@ -10,6 +10,10 @@ export const MONDAY = {
     lancamentos2026: 9392961557,
     lancamentos2027: 18412582876,
     portfolio: 8370828020,
+    warehouseSamples: 6758443649,
+  },
+  groups: {
+    warehouseSamples2026: 'group_title', // grupo "Samples 2026" do board 03 - Warehouse Samples
   },
   columns: {
     portfolio: {
@@ -19,6 +23,12 @@ export const MONDAY = {
       lastUpdate: 'pulse_updated_mm2gxajt',
       notes: 'text_mm26vw3j',
       owner: 'person',
+    },
+    warehouseSamples: {
+      dateReceived: 'date4', // "Date Received"
+      dateTested: 'date__1', // "Date Tested"
+      approval: 'status_1__1', // "Approval" (Approved / Not Approved / Approved w/ Restriction / Waiting / No Test Needed)
+      razao: 'dropdown_mm122nkz', // "Razão" — motivo(s) de reprovação (multi-select, texto separado por vírgula)
     },
   },
 };
@@ -135,6 +145,73 @@ export async function fetchLancUpdates(token: string): Promise<LancUpdateItem[]>
       .filter((u: LancUpdate) => u.ts > 0 && u.text.length >= 3)
       .sort((a: LancUpdate, b: LancUpdate) => b.ts - a.ts),
   }));
+}
+
+// ── Engenharia de Produto (board 03 - Warehouse Samples, grupo Samples 2026) ─
+export interface WarehouseSampleItem {
+  id: string; name: string;
+  dateReceived: string | null; dateTested: string | null;
+  approval: string | null; razao: string[];
+}
+
+/** Busca os itens do grupo "Samples 2026" do board 03 - Warehouse Samples, com
+ *  as datas de Recebimento/Teste, o status de Aprovação e o(s) motivo(s) de
+ *  reprovação ("Razão", multi-select), paginando por cursor. */
+export async function fetchWarehouseSamples(token: string, boardId: number, groupId: string): Promise<WarehouseSampleItem[]> {
+  const { dateReceived: recvId, dateTested: testId, approval: approvalId, razao: razaoId } = MONDAY.columns.warehouseSamples;
+  const items: WarehouseSampleItem[] = [];
+  let cursor: string | null = null;
+  do {
+    const cursorPart = cursor ? `, cursor: "${cursor}"` : '';
+    const query = `{
+      boards(ids: [${boardId}]) {
+        items_page(limit: 200${cursorPart}) {
+          cursor
+          items {
+            id name
+            group { id title }
+            column_values(ids: ["${recvId}","${testId}","${approvalId}","${razaoId}"]) { id text }
+          }
+        }
+      }
+    }`;
+    const json = await gql(token, query);
+    const page = json.data?.boards?.[0]?.items_page;
+    if (!page) throw new Error('Resposta inesperada da API');
+    (page.items || [])
+      .filter((it: MondayItem) => it.group?.id === groupId)
+      .forEach((it: MondayItem) => {
+        const cvs = it.column_values || [];
+        const razaoText = cvs.find((c) => c.id === razaoId)?.text || '';
+        items.push({
+          id: it.id,
+          name: it.name,
+          dateReceived: cvs.find((c) => c.id === recvId)?.text || null,
+          dateTested: cvs.find((c) => c.id === testId)?.text || null,
+          approval: cvs.find((c) => c.id === approvalId)?.text || null,
+          razao: razaoText.split(',').map((s) => s.trim()).filter(Boolean),
+        });
+      });
+    cursor = page.cursor || null;
+  } while (cursor);
+  return items;
+}
+
+/** Dias úteis entre duas datas (YYYY-MM-DD), inclusive em ambas as pontas —
+ *  mesma semântica da coluna fórmula "SLA Teste" (WORKDAYS) do board. */
+export function businessDaysInclusive(startStr: string, endStr: string): number | null {
+  const a0 = new Date(startStr + 'T00:00:00');
+  const b0 = new Date(endStr + 'T00:00:00');
+  if (isNaN(a0.getTime()) || isNaN(b0.getTime())) return null;
+  const [a, b] = a0 <= b0 ? [a0, b0] : [b0, a0];
+  let count = 0;
+  const d = new Date(a);
+  while (d <= b) {
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) count++;
+    d.setDate(d.getDate() + 1);
+  }
+  return count;
 }
 
 // ── Helpers de Prazo ─────────────────────────────────────────────────────
