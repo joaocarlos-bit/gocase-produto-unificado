@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const XLSX = require('xlsx');
 const { getGraphToken } = require('./graph-auth.cjs');
+const { fetchGocaseSales } = require('./metabase-sales.cjs');
 
 // ── Carrega .env.local manualmente (sem dependência) ─────────────────────
 function loadEnv() {
@@ -35,6 +36,9 @@ const SHAREPOINT_FILE_URL = process.env.SHAREPOINT_FILE_URL;
 // .xlsx no disco, o script lê dele e ignora o Graph. Usado enquanto o
 // consentimento de admin não sai. Pra voltar pro Graph: comente/remova essa env.
 const SHAREPOINT_FILE_LOCAL = process.env.SHAREPOINT_FILE_LOCAL;
+// Vendas realizadas vêm da card pública do Metabase (fresca, até D-1).
+// METABASE_SALES=0 volta a usar a aba Sales do Analytics BI.xlsx.
+const USE_METABASE = process.env.METABASE_SALES !== '0';
 
 if (!SHAREPOINT_FILE_LOCAL && (!GRAPH_CLIENT_ID || !GRAPH_TENANT_ID || !SHAREPOINT_FILE_URL)) {
   console.error('✗ Defina SHAREPOINT_FILE_LOCAL (modo arquivo local) OU GRAPH_CLIENT_ID/GRAPH_TENANT_ID/SHAREPOINT_FILE_URL (modo Graph) em .env.local');
@@ -193,6 +197,7 @@ const CANAL_TO_GRUPO = {
   'Varejo':                        'D2C',
   'Atacado':                       'B2B',
   'Lojas':                         'Lojas',
+  'Marketplace':                   'Marketplace',
   'Outros':                        'Brindes',
   // Legado Google (mantido por compat):
   'Resellers Brasil (Extrema)':    'B2B',
@@ -211,7 +216,7 @@ function classifyCanal(canalRaw, naturezaRaw) {
   // Canais não mapeados caem em Brindes — receita ~0, qtd inflacionando.
   return 'Brindes';
 }
-const GRUPOS = ['D2C', 'B2B', 'Lojas', 'Brindes'];
+const GRUPOS = ['D2C', 'B2B', 'Marketplace', 'Lojas', 'Brindes'];
 
 async function main() {
   let buf;
@@ -236,8 +241,11 @@ async function main() {
   // Histórico completo agora vem na própria aba Sales (Jan/25 →). O backfill
   // via Google gviz foi removido na migração pro SharePoint.
   const salesSheet = sheetToObjects(wb, ['Sales', 'Sales_refined', 'Vendas']);
-  const salesRaw = salesSheet.rows;
-  console.log(`  aba "${salesSheet.name}": ${salesRaw.length} linhas`);
+  // A aba Sales continua sendo a fonte do FORECAST (coluna `Projeção`), mesmo
+  // quando as vendas realizadas vêm do Metabase.
+  const salesForecastRows = salesSheet.rows;
+  let salesRaw = salesForecastRows;
+  console.log(`  aba "${salesSheet.name}": ${salesForecastRows.length} linhas`);
 
   console.log('▶ Lendo TicketSense…');
   const costsRaw = sheetToObjects(wb, ['TicketSense', 'Ticket Sense', 'Ticket']).rows;
@@ -247,6 +255,29 @@ async function main() {
   const giroSheet = sheetToObjects(wb, ['SlowMoving', 'Slow Moving', 'SLOWMOVING']);
   const giroRaw = giroSheet.rows;
   console.log(`  aba "${giroSheet.name}": ${giroRaw.length} linhas`);
+
+  // ── Vendas realizadas: Metabase (card 27799, até D-1) ─────────────────
+  // A aba Sales do xlsx é snapshot manual e fica dias atrás; a card cobre
+  // 2025-01 → D-1. Estoque/custo/curva (SlowMoving), TicketSense e o forecast
+  // (coluna `Projeção`) continuam vindo do Analytics BI.
+  if (USE_METABASE) {
+    console.log('▶ Vendas realizadas: Metabase (card pública)…');
+    // De-para chave → "Nome Único": o pipeline indexa SKU pelo NOME.
+    const nomePorChave = new Map();
+    for (const r of giroRaw) {
+      const ch = _col(r, ['Chave', 'chave', 'Código', 'Codigo']);
+      const nm = _col(r, ['Nome Único', 'Nome Unico', 'SKU Único', 'SKU Unico']);
+      if (ch && nm && !nomePorChave.has(String(ch).trim())) nomePorChave.set(String(ch).trim(), String(nm).trim());
+    }
+    console.log(`  de-para chave→nome: ${nomePorChave.size} SKUs (SlowMoving)`);
+    try {
+      const mbRows = await fetchGocaseSales({ nomePorChave, log: (m) => console.log(m) });
+      if (mbRows.length < 10000) throw new Error(`retorno suspeito do Metabase: ${mbRows.length} linhas`);
+      salesRaw = mbRows;
+    } catch (e) {
+      console.warn(`  ⚠ Metabase falhou (${e.message}) — usando a aba Sales do xlsx como fallback.`);
+    }
+  }
 
   // ── COST_MAP ──────────────────────────────────────────────────────────
   const COST_MAP = {};
@@ -298,7 +329,7 @@ async function main() {
   // porque meses futuros têm Projeção mas qtd=0 (seriam descartados pelo filtro).
   const PROJ_COLS = ['Projeção', 'Projecao', 'Projeçao', 'Projecão', 'Projeção', 'projeção', 'Projeção (Qtd)', 'Projecao Qtd'];
   let fcTotal = 0;
-  for (const r of salesRaw) {
+  for (const r of salesForecastRows) {
     // Mimo (cortesia) não entra no forecast — espelha o antigo descarte de 'mimo'.
     if (String(_col(r, ['Natureza', 'natureza']) || '').trim().toLowerCase() === 'mimo') continue;
     let lin = _col(r, ['Linha', 'linha']);

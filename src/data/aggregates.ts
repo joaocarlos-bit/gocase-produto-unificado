@@ -6,9 +6,54 @@ import type {
   ProcessedData,
   SalesBySkuPayload,
   Status,
+  TypeANewLine,
   Ym,
 } from './types';
 import { maxYm as pickMaxYm, shiftYm } from '../lib/format';
+import launchOverrides from './launch-overrides.json';
+
+// ────────────────────────────────────────────────────────────
+// CALENDÁRIO OFICIAL DE LANÇAMENTOS (Monday) — fonte de verdade da data de
+// estreia, compartilhada com o Mapa (src/data/launchMap.ts). Ver
+// launch-overrides.json (regenerar: node scripts/gen-launch-overrides.cjs).
+// ────────────────────────────────────────────────────────────
+const LAUNCH_CALENDAR: Record<string, Ym> = launchOverrides.calendar2025 as Record<string, Ym>;
+const LAUNCH_EXCLUDE_LINES = new Set<string>(launchOverrides.excludeLines ?? []);
+
+/** Linha está no calendário oficial 2025 (linha nova, Novidade)? */
+export function isCalendarLaunchLine(linha: string): boolean {
+  return Object.prototype.hasOwnProperty.call(LAUNCH_CALENDAR, linha);
+}
+
+/**
+ * Lista efetiva de "novas linhas" para as telas de Lançamentos: parte do
+ * typeA_newLines do pipeline, mas (1) sobrepõe a data de estreia pela oficial do
+ * calendário, (2) injeta linhas do calendário ausentes do typeA (ex.: Mini Tote,
+ * que vendeu já em jan/25 e o pipeline classificaria como catálogo), e
+ * (3) remove linhas excluídas (Skins). Assim a aba "Definição da squad" mostra
+ * os lançamentos 2025 mapeados a partir do mês oficial de estreia.
+ */
+export function effectiveNewLines(data: ProcessedData): TypeANewLine[] {
+  const out: TypeANewLine[] = [];
+  const seen = new Set<string>();
+  for (const item of data.typeA_newLines) {
+    if (LAUNCH_EXCLUDE_LINES.has(item.linha)) continue;
+    const cal = LAUNCH_CALENDAR[item.linha];
+    out.push(cal ? { ...item, firstSale: cal } : item);
+    seen.add(item.linha);
+  }
+  for (const [linha, mes] of Object.entries(LAUNCH_CALENDAR)) {
+    if (seen.has(linha) || LAUNCH_EXCLUDE_LINES.has(linha)) continue;
+    const anySku = Object.values(data.STOCK_MAP).find((s) => s.linha === linha);
+    out.push({
+      linha,
+      categoria: (anySku?.categoria ?? 'Gift') as Categoria,
+      firstSale: mes,
+      status: (anySku?.status ?? data.salesByLinha[linha]?.status ?? '—') as Status,
+    });
+  }
+  return out;
+}
 
 // ────────────────────────────────────────────────────────────
 // CANAIS — filtro aplicado antes da agregação
@@ -82,10 +127,11 @@ export interface CanalTotal {
 
 export function totalsByCanal(data: ProcessedData, from: Ym, to: Ym): CanalTotal[] {
   const accs: Record<CanalGrupo, { qtd: number; receita: number; linhas: Set<string> }> = {
-    D2C:     { qtd: 0, receita: 0, linhas: new Set() },
-    B2B:     { qtd: 0, receita: 0, linhas: new Set() },
-    Lojas:   { qtd: 0, receita: 0, linhas: new Set() },
-    Brindes: { qtd: 0, receita: 0, linhas: new Set() },
+    D2C:         { qtd: 0, receita: 0, linhas: new Set() },
+    B2B:         { qtd: 0, receita: 0, linhas: new Set() },
+    Marketplace: { qtd: 0, receita: 0, linhas: new Set() },
+    Lojas:       { qtd: 0, receita: 0, linhas: new Set() },
+    Brindes:     { qtd: 0, receita: 0, linhas: new Set() },
   };
   for (const [linha, sd] of Object.entries(data.salesByLinha)) {
     for (const [ym, cell] of Object.entries(sd.months)) {
@@ -171,7 +217,7 @@ export function totalsByCanalWithSkus(
 ): CanalTotal[] {
   const base = totalsByCanal(data, from, to);
   const skuSets: Record<CanalGrupo, Set<string>> = {
-    D2C: new Set(), B2B: new Set(), Lojas: new Set(), Brindes: new Set(),
+    D2C: new Set(), B2B: new Set(), Marketplace: new Set(), Lojas: new Set(), Brindes: new Set(),
   };
   for (const [sku, sd] of Object.entries(sales.salesBySku)) {
     for (const [ym, cell] of Object.entries(sd.months)) {
@@ -1141,10 +1187,11 @@ export function buildLancamentos(
   }
 
   // ── Type A: novas linhas ─────────────────────────────────────
-  // Só conta como lançamento as linhas que estrearam a partir de LAUNCH_CUTOFF
-  // (alinhado com a definição da squad — linhas pré-cutoff são "catálogo existente").
-  for (const item of data.typeA_newLines) {
-    if (item.firstSale < LAUNCH_CUTOFF) continue;
+  // Sem cutoff hardcoded: retornamos TODAS as novas linhas do snapshot
+  // (typeA já só contém estreias pós-jan/25). O escopo por data de estreia
+  // é aplicado na UI via picker (LAUNCH_CUTOFF é só o DEFAULT do picker),
+  // pra o usuário poder ampliar a janela e comparar com estreias anteriores.
+  for (const item of effectiveNewLines(data)) {
     const traj = trajectoryFor(item.linha, item.firstSale);
     const bounds = effectiveBounds(item.firstSale);
     // SKUs novos: total de SKUs da linha em STOCK_MAP (a linha inteira é nova)
@@ -1185,12 +1232,16 @@ export function buildLancamentos(
   }
 
   // ── Type B: drops de cor (SKUs novos em linhas existentes) ──
-  // Só conta SKUs que estrearam a partir de LAUNCH_CUTOFF — drops antigos
-  // viraram catálogo existente e não inflam mais o KPI de lançamentos.
+  // Sem cutoff hardcoded: consideramos todos os SKUs do drop (typeB já só
+  // contém SKUs que estrearam depois da linha). O escopo por data de estreia
+  // é aplicado na UI via picker, igual ao typeA.
   // qtdAcum/receitaAcum agregados POR SKU (não pela linha inteira) — a linha
   // tem SKUs antigos de catálogo que não fazem parte do drop.
   for (const [linha, ext] of Object.entries(data.typeB_extensions)) {
-    const skusInScope = ext.skus.filter((s) => s.firstSale >= LAUNCH_CUTOFF);
+    // Linhas do calendário são tratadas como novas linhas (typeA) e linhas
+    // excluídas (Skins) saem do mapa — evita duplicar/poluir.
+    if (isCalendarLaunchLine(linha) || LAUNCH_EXCLUDE_LINES.has(linha)) continue;
+    const skusInScope = ext.skus;
     if (!skusInScope.length) continue;
     const newest = skusInScope.reduce((a, b) => (a.firstSale > b.firstSale ? a : b));
     const firstSale = newest.firstSale; // drop mais recente dentro do escopo
@@ -1487,9 +1538,8 @@ export function buildMaterialLancamentos(
   // ── Tipo A — expande cada nova linha em N SKUs via STOCK_MAP ──
   // Só conta como Tipo A os SKUs que estrearam JUNTO com a linha; SKUs que
   // estrearam depois são drops de cor e aparecem no loop Tipo B abaixo.
-  // Linhas pré-LAUNCH_CUTOFF são "catálogo existente" — não entram como lançamento.
-  for (const item of data.typeA_newLines) {
-    if (item.firstSale < LAUNCH_CUTOFF) continue;
+  // Sem cutoff hardcoded: o escopo por data de estreia é aplicado na UI via picker.
+  for (const item of effectiveNewLines(data)) {
     const skusOfLinha = Object.entries(data.STOCK_MAP)
       .filter(([, s]) => s.linha === item.linha);
     if (skusOfLinha.length === 0) {
@@ -1524,12 +1574,12 @@ export function buildMaterialLancamentos(
   }
 
   // ── Tipo B — cada SKU dentro do drop ──
-  // Só conta SKUs que estrearam a partir de LAUNCH_CUTOFF.
+  // Sem cutoff hardcoded: o escopo por data de estreia é aplicado na UI via picker.
   for (const [linha, ext] of Object.entries(data.typeB_extensions)) {
+    if (isCalendarLaunchLine(linha) || LAUNCH_EXCLUDE_LINES.has(linha)) continue;
     const sd = data.salesByLinha[linha];
     const status = sd?.status ?? '—';
     for (const item of ext.skus) {
-      if (item.firstSale < LAUNCH_CUTOFF) continue;
       out.push(withReal({
         tipo: 'B',
         sku: item.sku,

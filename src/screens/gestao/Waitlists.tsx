@@ -14,7 +14,7 @@ import { Pager, paginate } from '../../components/Pager';
 import {
   loadSheetViaJSONP, loadSheetDynamic, parseDateBR, parseSheetNum, GESTAO_CONFIG,
 } from '../../data/gviz';
-import { loadDriveImages, loadCtrImages, getLocalCtrImages, normalizeProductName, driveImageUrl, extractDriveId, type LocalCtrProduct } from '../../data/driveImages';
+import { loadDriveImages, loadCtrImages, getLocalCtrImages, normalizeProductName, cleanTestName, resolveDriveIds, driveImageUrl, extractDriveId, type LocalCtrProduct } from '../../data/driveImages';
 
 const fmtBRL = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(v);
 const fmtBRL2 = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
@@ -126,13 +126,14 @@ export function Waitlists() {
     loadCtrImages().catch(() => {}); // no-op se ENDPOINT_CTR não estiver configurado
   }, []);
 
-  // Abre carrossel de um produto Waitlist (imagens do Drive por nome normalizado)
+  // Abre carrossel de um produto Waitlist. Casa contra o manifesto Waitlist e,
+  // como reforço, o de CTR — com a mesma cascata fuzzy usada nos testes de CTR
+  // (antes era só match exato, o que derrubava a taxa de acerto pela metade).
   const openProduct = async (produto: string) => {
     setCarousel({ label: produto, urls: [], idx: 0, loading: true });
     try {
-      const map = await loadDriveImages();
-      const hit = map[normalizeProductName(produto)];
-      const urls = hit?.ids?.length ? hit.ids.map((id) => driveImageUrl(id, 1200)) : [];
+      const [wlMap, ctrMap] = await Promise.all([loadDriveImages(), loadCtrImages()]);
+      const urls = resolveDriveIds(produto, [wlMap, ctrMap]).map((id) => driveImageUrl(id, 1200));
       setCarousel({ label: produto, urls, idx: 0, loading: false });
     } catch {
       setCarousel({ label: produto, urls: [], idx: 0, loading: false });
@@ -153,48 +154,23 @@ export function Waitlists() {
     const fromFallbackUrl = () =>
       fallbackUrl ? fallbackUrl.split(/[\n,]+/).map((u) => u.trim()).filter(Boolean).map((u) => toThumb(u)!) : [];
 
-    // 1. Manifesto local
+    // Nome do teste sem ruído ([VIDEO], sufixo de cor, colchetes) p/ casar melhor
+    const clean = cleanTestName(nome);
+
+    // 1. Manifesto local (build standalone) — tenta nome limpo e cru
     const localManifest = getLocalCtrImages();
     if (localManifest) {
-      const hit: LocalCtrProduct | undefined = localManifest[normalizeProductName(nome)];
+      const hit: LocalCtrProduct | undefined =
+        localManifest[normalizeProductName(clean)] || localManifest[normalizeProductName(nome)];
       if (hit?.urls?.length) { setCarousel({ label: nome, urls: hit.urls, idx: 0, loading: false }); return; }
     }
 
-    // 2. ENDPOINT_CTR (Apps Script da pasta CTR do Drive)
+    // 2+3. Manifestos CTR e Waitlist (via Drive), com cascata exato→fuzzy em ambos
     try {
-      const map = await loadCtrImages();
-      const hit = map[normalizeProductName(nome)];
-      const urls = hit?.ids?.length ? hit.ids.map((id) => driveImageUrl(id, 1200)) : [];
+      const [ctrMap, wlMap] = await Promise.all([loadCtrImages(), loadDriveImages()]);
+      const urls = resolveDriveIds(clean, [ctrMap, wlMap]).map((id) => driveImageUrl(id, 1200));
       if (urls.length > 0) { setCarousel({ label: nome, urls, idx: 0, loading: false }); return; }
-    } catch { /* segue para próximo fallback */ }
-
-    // 3. Manifesto Waitlist — tenta em ordem: exato → chave contida no teste →
-    //    primeiras N palavras do teste contidas numa chave (prefixo progressivo)
-    try {
-      const wlMap = await loadDriveImages();
-      const normNome = normalizeProductName(nome);
-      // Chaves ordenadas por comprimento desc para preferir match mais específico
-      const wlKeys = Object.keys(wlMap).sort((a, b) => b.length - a.length);
-      let hit = wlMap[normNome];
-      if (!hit) {
-        // Direção 1: chave é substring do nome do teste ("tote carry" in "tote carry duocolor")
-        const k1 = wlKeys.find((k) => k.length >= 4 && normNome.includes(k));
-        if (k1) hit = wlMap[k1];
-      }
-      if (!hit) {
-        // Direção 2: primeiras N palavras do teste estão contidas em alguma chave
-        // ("mala voyage" in "mala voyage novas cores") — N decresce até 2
-        const words = normNome.split(/\s+/);
-        for (let n = Math.min(words.length, 4); n >= 2 && !hit; n--) {
-          const prefix = words.slice(0, n).join(' ');
-          if (prefix.length < 4) continue;
-          const k2 = wlKeys.find((k) => k.includes(prefix));
-          if (k2) hit = wlMap[k2];
-        }
-      }
-      const urls = hit?.ids?.length ? hit.ids.map((id) => driveImageUrl(id, 1200)) : [];
-      if (urls.length > 0) { setCarousel({ label: nome, urls, idx: 0, loading: false }); return; }
-    } catch { /* segue */ }
+    } catch { /* segue para o fallback da planilha */ }
 
     // 4. Coluna "Imagem" da planilha
     const fallbackUrls = fromFallbackUrl();

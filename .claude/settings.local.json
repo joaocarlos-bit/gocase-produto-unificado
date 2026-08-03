@@ -1,0 +1,6 @@
+{
+  "enabledMcpjsonServers": [
+    "godeploy"
+  ],
+  "enableAllProjectMcpServers": true
+}

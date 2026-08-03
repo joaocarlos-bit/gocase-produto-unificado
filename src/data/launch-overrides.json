@@ -1,0 +1,181 @@
+{
+  "_doc": "Fonte única de curadoria do Mapa de lançamentos (front src/data/launchMap.ts + gerador scripts/build-launch-map-xlsx.cjs). Regenerar: node scripts/gen-launch-overrides.cjs",
+  "since": "2025-02",
+  "_calendar2025_doc": "Linha -> mês de lançamento OFICIAL (Monday \"⭐️ lançamentos 2025\", escopo Novidade+Novas Cores). Sobrepõe a 1ª venda (censurada em jan/25).",
+  "calendar2025": {
+    "Base de Silicone P": "2025-05",
+    "Bolsa Moove": "2025-10",
+    "Bolsa Voyage": "2025-02",
+    "Case Bold Magsafe": "2025-07",
+    "Coleira Pet": "2025-10",
+    "Copo Life 880ml": "2025-01",
+    "Copo Vibe 470ml": "2025-10",
+    "Cordão de cases": "2025-11",
+    "Garrafa Fresh 1200ml": "2025-03",
+    "Garrafa Fresh 650ml": "2025-11",
+    "Garrafa Fresh 950ml": "2025-11",
+    "Garrafa Magsafe 750ml": "2025-08",
+    "Garrafa Mini 350ml": "2025-09",
+    "Garrafa Pro 750ml": "2025-06",
+    "Garrafa urban 500ml": "2025-09",
+    "Guia Pet": "2025-10",
+    "Kit canetinha marca texto": "2025-10",
+    "Lancheira Daily": "2025-05",
+    "Lancheira Urban": "2025-09",
+    "Mala Voyage 20\"": "2025-11",
+    "Mini Tote": "2025-04",
+    "Mochila Executiva": "2025-04",
+    "Mochila Rodinha Fun": "2025-07",
+    "Mochila Voyage": "2025-02",
+    "Necessaire Trip": "2025-03",
+    "Necessaire Voyage": "2025-02",
+    "Peitoral Pet": "2025-10",
+    "Taça Térmica 420ml": "2025-12",
+    "Tote Colors": "2025-12",
+    "Tote Puff": "2025-05"
+  },
+  "_calendar2025Meta_doc": "Linha -> { mes, tipo: A (Nova Linha) | B (Drop de Cor) }. Usado pelos relatórios semestrais.",
+  "calendar2025Meta": {
+    "Base de Silicone P": {
+      "mes": "2025-05",
+      "tipo": "A"
+    },
+    "Bolsa Moove": {
+      "mes": "2025-10",
+      "tipo": "B"
+    },
+    "Bolsa Voyage": {
+      "mes": "2025-02",
+      "tipo": "A"
+    },
+    "Case Bold Magsafe": {
+      "mes": "2025-07",
+      "tipo": "A"
+    },
+    "Coleira Pet": {
+      "mes": "2025-10",
+      "tipo": "A"
+    },
+    "Copo Life 880ml": {
+      "mes": "2025-01",
+      "tipo": "A"
+    },
+    "Copo Vibe 470ml": {
+      "mes": "2025-10",
+      "tipo": "B"
+    },
+    "Cordão de cases": {
+      "mes": "2025-11",
+      "tipo": "A"
+    },
+    "Garrafa Fresh 1200ml": {
+      "mes": "2025-03",
+      "tipo": "A"
+    },
+    "Garrafa Fresh 650ml": {
+      "mes": "2025-11",
+      "tipo": "B"
+    },
+    "Garrafa Fresh 950ml": {
+      "mes": "2025-11",
+      "tipo": "B"
+    },
+    "Garrafa Magsafe 750ml": {
+      "mes": "2025-08",
+      "tipo": "A"
+    },
+    "Garrafa Mini 350ml": {
+      "mes": "2025-09",
+      "tipo": "B"
+    },
+    "Garrafa Pro 750ml": {
+      "mes": "2025-06",
+      "tipo": "A"
+    },
+    "Garrafa urban 500ml": {
+      "mes": "2025-09",
+      "tipo": "B"
+    },
+    "Guia Pet": {
+      "mes": "2025-10",
+      "tipo": "A"
+    },
+    "Kit canetinha marca texto": {
+      "mes": "2025-10",
+      "tipo": "A"
+    },
+    "Lancheira Daily": {
+      "mes": "2025-05",
+      "tipo": "A"
+    },
+    "Lancheira Urban": {
+      "mes": "2025-09",
+      "tipo": "A"
+    },
+    "Mala Voyage 20\"": {
+      "mes": "2025-11",
+      "tipo": "A"
+    },
+    "Mini Tote": {
+      "mes": "2025-04",
+      "tipo": "A"
+    },
+    "Mochila Executiva": {
+      "mes": "2025-04",
+      "tipo": "A"
+    },
+    "Mochila Rodinha Fun": {
+      "mes": "2025-07",
+      "tipo": "B"
+    },
+    "Mochila Voyage": {
+      "mes": "2025-02",
+      "tipo": "A"
+    },
+    "Necessaire Trip": {
+      "mes": "2025-03",
+      "tipo": "B"
+    },
+    "Necessaire Voyage": {
+      "mes": "2025-02",
+      "tipo": "A"
+    },
+    "Peitoral Pet": {
+      "mes": "2025-10",
+      "tipo": "A"
+    },
+    "Taça Térmica 420ml": {
+      "mes": "2025-12",
+      "tipo": "A"
+    },
+    "Tote Colors": {
+      "mes": "2025-12",
+      "tipo": "A"
+    },
+    "Tote Puff": {
+      "mes": "2025-05",
+      "tipo": "A"
+    }
+  },
+  "_manualSkus_doc": "Override por SKU (drops de cor censurados em jan/25). SKU exato -> mês do drop. Entram mesmo com 1ª venda < since.",
+  "manualSkus": {
+    "Tote Bag Marrom": "2025-03",
+    "Tote Bag Bege com Caramelo": "2025-03",
+    "Mochila Rodinha BTS Rose": "2025-07"
+  },
+  "_excludeCollabTerms_doc": "Termos (case/acento-insensível) de estampas/coleções temáticas removidas por nome do SKU.",
+  "excludeCollabTerms": [
+    "mickey",
+    "minnie",
+    "flutuante"
+  ],
+  "_excludeCategories_doc": "Categorias inteiras ocultadas.",
+  "excludeCategories": [
+    "Spare Part"
+  ],
+  "_excludeLines_doc": "Linhas específicas ocultadas (não são lançamento de produto).",
+  "excludeLines": [
+    "Skin Gocase",
+    "Skin Borders"
+  ]
+}

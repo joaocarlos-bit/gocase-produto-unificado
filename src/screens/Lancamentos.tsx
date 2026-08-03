@@ -21,11 +21,13 @@ import { LaunchMonthlyCharts } from '../components/LaunchMonthlyCharts';
 import { MultiSelect } from '../components/MultiSelect';
 import { Card } from '../components/Card';
 import { fmtNum, fmtPct } from '../lib/format';
+import { LancamentosMapa } from './LancamentosMapa';
 
 interface Props { data: ProcessedData; sales: SalesBySkuPayload; }
 
 type TipoFilter = 'all' | 'A' | 'B';
 type ViewMode = 'linha' | 'material';
+type SubTab = 'squad' | 'mapa';
 
 export function Lancamentos({ data, sales }: Props) {
   // Picker liberado pra todo o snapshot — usuário pode comparar com estreias anteriores
@@ -46,6 +48,7 @@ export function Lancamentos({ data, sales }: Props) {
   const [filterMats, setFilterMats] = useState<string[]>([]);
   const [search, setSearch] = useState<string>('');
   const [view, setView] = useState<ViewMode>('linha');
+  const [subTab, setSubTab] = useState<SubTab>('squad');
   // Cross-filter: linha selecionada via clique na tabela
   const [selectedLinha, setSelectedLinha] = useState<string | null>(null);
 
@@ -121,6 +124,17 @@ export function Lancamentos({ data, sales }: Props) {
 
   return (
     <div className="lc">
+      <div className="lc__subtabs">
+        <button className={`lc__subtab ${subTab === 'squad' ? 'on' : ''}`} onClick={() => setSubTab('squad')}>Definição da squad</button>
+        <button className={`lc__subtab ${subTab === 'mapa' ? 'on' : ''}`} onClick={() => setSubTab('mapa')}>Mapa de lançamentos 2025+</button>
+      </div>
+      <style>{`
+        .lc__subtabs { display: flex; gap: 6px; margin-bottom: 18px; border-bottom: 1.5px solid var(--border); }
+        .lc__subtab { background: none; border: none; border-bottom: 2.5px solid transparent; padding: 8px 14px; font-size: 13px; font-weight: 700; color: var(--text-3); cursor: pointer; margin-bottom: -1.5px; }
+        .lc__subtab:hover { color: var(--text); }
+        .lc__subtab.on { color: var(--brand-blue); border-bottom-color: var(--brand-blue); }
+      `}</style>
+      {subTab === 'mapa' ? <LancamentosMapa data={data} sales={sales} /> : (<>
       <PageHero
         breadcrumb="Unidade de negócio: Produto Gocase · Lançamentos"
         title="Lançamentos"
@@ -554,6 +568,7 @@ export function Lancamentos({ data, sales }: Props) {
           margin-top: 3px;
         }
       `}</style>
+      </>)}
     </div>
   );
 }

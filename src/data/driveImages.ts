@@ -43,6 +43,39 @@ export function normalizeProductName(s: string): string {
     .trim();
 }
 
+/** Remove ruído de nomes de teste CTR antes de casar com o manifesto:
+ *  prefixo [VIDEO]/[VÍDEO], sufixo de cor após em-dash e colchetes. */
+export function cleanTestName(raw: string): string {
+  return String(raw || '')
+    .replace(/^\s*\[?\s*v[íi]deo\s*\]?\s*/i, '')
+    .split('—')[0]
+    .replace(/[\[\]]/g, '')
+    .trim();
+}
+
+/** Casa um nome contra 1+ manifestos e devolve os IDs do Drive.
+ *  Ordem: exato (normalizado) → chave contida no nome → primeiras N palavras
+ *  do nome contidas numa chave. Preferindo sempre o match mais específico. */
+export function resolveDriveIds(name: string, manifests: DriveManifest[]): string[] {
+  const n = normalizeProductName(name);
+  for (const man of manifests) {
+    if (man[n]?.ids?.length) return man[n].ids;
+  }
+  for (const man of manifests) {
+    const keys = Object.keys(man).sort((a, b) => b.length - a.length);
+    const k1 = keys.find((k) => k.length >= 4 && n.includes(k));
+    if (k1 && man[k1]?.ids?.length) return man[k1].ids;
+    const words = n.split(/\s+/);
+    for (let x = Math.min(words.length, 4); x >= 2; x--) {
+      const pre = words.slice(0, x).join(' ');
+      if (pre.length < 4) continue;
+      const k2 = keys.find((k) => k.includes(pre));
+      if (k2 && man[k2]?.ids?.length) return man[k2].ids;
+    }
+  }
+  return [];
+}
+
 // Endpoint thumbnail do Drive — mais confiável p/ embed que lh3 (que bloqueia
 // hotlink por referrer de outras origens). Combinar com referrerPolicy="no-referrer".
 export function driveImageUrl(id: string, width = 1200): string {

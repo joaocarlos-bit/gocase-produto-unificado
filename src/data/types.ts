@@ -6,8 +6,8 @@ export type CurvaABC = 'AA' | 'A' | 'B' | 'C' | 'Não Classificado' | string;
 export type Ym = string; // 'YYYY-MM'
 
 /** Grupos de canal — agregação aplicada no refresh-snapshot.cjs. */
-export type CanalGrupo = 'D2C' | 'B2B' | 'Lojas' | 'Brindes';
-export const CANAL_GRUPOS: CanalGrupo[] = ['D2C', 'B2B', 'Lojas', 'Brindes'];
+export type CanalGrupo = 'D2C' | 'B2B' | 'Marketplace' | 'Lojas' | 'Brindes';
+export const CANAL_GRUPOS: CanalGrupo[] = ['D2C', 'B2B', 'Marketplace', 'Lojas', 'Brindes'];
 export interface CanalCell { qtd: number; receita: number; }
 
 export interface RawMeta {

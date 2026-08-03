@@ -1,48 +1,19 @@
 import { useMemo, useState } from 'react';
 import { PageHero } from '../../components/PageHero';
-
-interface LinkItem {
-  title: string;
-  url: string;
-  description: string;
-  icon: string;
-  category: string;
-}
-
-// Diretório de ferramentas internas. Pra adicionar um link, basta uma entrada aqui.
-const LINKS: LinkItem[] = [
-  {
-    title: 'CTR Machine',
-    url: 'https://ctrmachine-gocase.vercel.app/',
-    description: 'Gerador de criativos competitivos — a partir do link de um concorrente, rebranda na identidade Gocase e gera variações de criativo.',
-    icon: '🎯',
-    category: 'Ferramentas',
-  },
-  {
-    title: 'Calendário de Lançamentos',
-    url: 'https://lancamentosgocase.vercel.app/',
-    description: 'Galeria e calendário dos lançamentos Gocase 2026/2027 — visão de produtos por mês.',
-    icon: '🗓️',
-    category: 'Ferramentas',
-  },
-];
-
-function hostOf(url: string): string {
-  try { return new URL(url).host; } catch { return url; }
-}
+import { PRODUCT_APPS, hostOf, type ProductApp } from '../../data/productApps';
 
 export function CentralLinks() {
   const [q, setQ] = useState('');
 
   const groups = useMemo(() => {
     const term = q.trim().toLocaleLowerCase('pt-BR');
-    const filtered = LINKS.filter(
+    const filtered = PRODUCT_APPS.filter(
       (l) => term === '' ||
         l.title.toLocaleLowerCase('pt-BR').includes(term) ||
         l.description.toLocaleLowerCase('pt-BR').includes(term) ||
         l.category.toLocaleLowerCase('pt-BR').includes(term),
     );
-    const map = new Map<string, LinkItem[]>();
+    const map = new Map<string, ProductApp[]>();
     for (const l of filtered) {
       if (!map.has(l.category)) map.set(l.category, []);
       map.get(l.category)!.push(l);

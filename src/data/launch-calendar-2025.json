@@ -1,0 +1,566 @@
+{
+  "_doc": "Calendário oficial de lançamentos 2025 (export do Monday da Gocase, aba \"⭐️ lançamentos 2025\"). mes = grupo do Monday (mês de lançamento). Fonte de verdade da data de estreia.",
+  "updatedAt": "2026-07-13",
+  "items": [
+    {
+      "mes": null,
+      "status": "Cancelado",
+      "tipo": "",
+      "categoriaMonday": "PET",
+      "nome": "Peitoral H",
+      "raw": "🇧🇷 [PET] Peitoral H"
+    },
+    {
+      "mes": null,
+      "status": "Cancelado",
+      "tipo": "",
+      "categoriaMonday": "TÉXTIL",
+      "nome": "Linha Fun (Dourado)",
+      "raw": "🇧🇷 [TÉXTIL] Linha Fun (Dourado)"
+    },
+    {
+      "mes": null,
+      "status": "Cancelado",
+      "tipo": "",
+      "categoriaMonday": "TÉXTIL",
+      "nome": "Mochila Casual 2.0",
+      "raw": "🇧🇷 [TÉXTIL] Mochila Casual 2.0"
+    },
+    {
+      "mes": null,
+      "status": "No prazo",
+      "tipo": "",
+      "categoriaMonday": "TÉRMICO",
+      "nome": "Garrafa Pro (Cores especiais)",
+      "raw": "🇧🇷 [TÉRMICO] Garrafa Pro (Cores especiais)"
+    },
+    {
+      "mes": null,
+      "status": "No prazo",
+      "tipo": "",
+      "categoriaMonday": "TÉRMICO",
+      "nome": "Alça Copo Life 1180ml",
+      "raw": "🇧🇷 [TÉRMICO] Alça Copo Life 1180ml"
+    },
+    {
+      "mes": null,
+      "status": "No prazo",
+      "tipo": "",
+      "categoriaMonday": "TÉRMICO",
+      "nome": "Ajuste da tampa do copo life",
+      "raw": "🇧🇷 [TÉRMICO] Ajuste da tampa do copo life"
+    },
+    {
+      "mes": "2025-12",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TÉRMICOS",
+      "nome": "Taça Térmica",
+      "raw": "🇧🇷 [TÉRMICOS] Taça Térmica"
+    },
+    {
+      "mes": "2025-12",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TÉXTIL",
+      "nome": "Bolsa Tote Shopper (Colors)",
+      "raw": "🇧🇷 [TÉXTIL] Bolsa Tote Shopper (Colors)"
+    },
+    {
+      "mes": "2025-11",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "MALA",
+      "nome": "Mala Trip (P1)",
+      "raw": "🇧🇷 [MALA] Mala Trip (P1)"
+    },
+    {
+      "mes": "2025-11",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TÉRMICO",
+      "nome": "Garrafa Fun (Kids)",
+      "raw": "🇧🇷 [TÉRMICO] Garrafa Fun (Kids)"
+    },
+    {
+      "mes": "2025-11",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "ACESSÓRIOS",
+      "nome": "Cordão de Cases",
+      "raw": "🇧🇷 [ACESSÓRIOS] Cordão de Cases"
+    },
+    {
+      "mes": "2025-11",
+      "status": "Lançado!",
+      "tipo": "Novas Cores",
+      "categoriaMonday": "TÉRMICO",
+      "nome": "Garrafa Fresh 950ml (Novas Cores)",
+      "raw": "🇧🇷 [TÉRMICO] Garrafa Fresh 950ml (Novas Cores)"
+    },
+    {
+      "mes": "2025-11",
+      "status": "Lançado!",
+      "tipo": "Novas Cores",
+      "categoriaMonday": "TÉRMICO",
+      "nome": "Garrafa Fresh 650ml (Novas Cores)",
+      "raw": "🇧🇷 [TÉRMICO] Garrafa Fresh 650ml (Novas Cores)"
+    },
+    {
+      "mes": "2025-11",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TÉXTIL",
+      "nome": "Mala Voyage",
+      "raw": "🇧🇷 [TÉXTIL] Mala Voyage"
+    },
+    {
+      "mes": "2025-10",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "PET",
+      "nome": "Guia",
+      "raw": "🇧🇷 [PET] Guia"
+    },
+    {
+      "mes": "2025-10",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "PET",
+      "nome": "Coleira",
+      "raw": "🇧🇷 [PET] Coleira"
+    },
+    {
+      "mes": "2025-10",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "PET",
+      "nome": "Peitoral",
+      "raw": "🇧🇷 [PET] Peitoral"
+    },
+    {
+      "mes": "2025-10",
+      "status": "Lançado!",
+      "tipo": "Novas Cores",
+      "categoriaMonday": "TÉXTIL",
+      "nome": "Bolsa Moove (Novas Cores)",
+      "raw": "🇧🇷 [TÉXTIL] Bolsa Moove (Novas Cores)"
+    },
+    {
+      "mes": "2025-10",
+      "status": "Lançado!",
+      "tipo": "Novas Cores",
+      "categoriaMonday": "TÉRMICO",
+      "nome": "Copo Vibe (Novas cores)",
+      "raw": "🇧🇷 [TÉRMICO] Copo Vibe (Novas cores)"
+    },
+    {
+      "mes": "2025-10",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "MIMO",
+      "nome": "Kit canetinha marca texto",
+      "raw": "🇧🇷 [MIMO] Kit canetinha marca texto"
+    },
+    {
+      "mes": "2025-10",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "Xiaomi Poco X7 Pro",
+      "raw": "🇧🇷 [TECH] Xiaomi Poco X7 Pro"
+    },
+    {
+      "mes": "2025-09",
+      "status": "Lançado!",
+      "tipo": "Novas Cores",
+      "categoriaMonday": "TÉRMICO",
+      "nome": "Garrafa Urban (Novas Cores)",
+      "raw": "🇧🇷 [TÉRMICO] Garrafa Urban (Novas Cores)"
+    },
+    {
+      "mes": "2025-09",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TÉXTIL",
+      "nome": "Lancheira Urban (Black Friday)",
+      "raw": "🇧🇷 [TÉXTIL] Lancheira Urban (Black Friday)"
+    },
+    {
+      "mes": "2025-09",
+      "status": "Lançado!",
+      "tipo": "Novas Cores",
+      "categoriaMonday": "TÉRMICO",
+      "nome": "Garrafa Mini (Novas cores)",
+      "raw": "🇧🇷 [TÉRMICO] Garrafa Mini (Novas cores)"
+    },
+    {
+      "mes": "2025-09",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "Infinite Air",
+      "raw": "🇧🇷 [TECH] Infinite Air"
+    },
+    {
+      "mes": "2025-09",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "Infinite (Novas Cores - Marrom, Vinho)",
+      "raw": "🇧🇷 [TECH] Infinite (Novas Cores - Marrom, Vinho)"
+    },
+    {
+      "mes": "2025-09",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "Samsung S25 Fe",
+      "raw": "🇧🇷 [TECH] Samsung S25 Fe"
+    },
+    {
+      "mes": "2025-08",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "Linha Iphone 17",
+      "raw": "🇧🇷 [TECH] Linha Iphone 17"
+    },
+    {
+      "mes": "2025-08",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TÉRMICO",
+      "nome": "Garrafa Magsafe",
+      "raw": "🇧🇷 [TÉRMICO] Garrafa Magsafe"
+    },
+    {
+      "mes": "2025-08",
+      "status": "Lançado!",
+      "tipo": "Facelift",
+      "categoriaMonday": "TECH",
+      "nome": "Powerbank Fast Charge 2.0",
+      "raw": "🇧🇷 [TECH] Powerbank Fast Charge 2.0"
+    },
+    {
+      "mes": "2025-08",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "JOVI - Y29",
+      "raw": "🇧🇷 [TECH] JOVI - Y29"
+    },
+    {
+      "mes": "2025-08",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "Cases Magsafe (Importadas)",
+      "raw": "🇧🇷 [TECH] Cases Magsafe (Importadas)"
+    },
+    {
+      "mes": "2025-07",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "Cases (Teste de qualidade)",
+      "raw": "🇧🇷 [TECH] Cases (Teste de qualidade)"
+    },
+    {
+      "mes": "2025-07",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "Case de couro",
+      "raw": "🇧🇷 [TECH] Case de couro"
+    },
+    {
+      "mes": "2025-07",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "Case Bold Magsafe",
+      "raw": "🇧🇷 [TECH] Case Bold Magsafe"
+    },
+    {
+      "mes": "2025-07",
+      "status": "Lançado!",
+      "tipo": "Facelift",
+      "categoriaMonday": "MIMO",
+      "nome": "Marmita Up",
+      "raw": "🇧🇷 [MIMO] Marmita Up"
+    },
+    {
+      "mes": "2025-07",
+      "status": "Lançado!",
+      "tipo": "Novas Cores",
+      "categoriaMonday": "TÉXTIL",
+      "nome": "Mochila 4 Rodinhas Fun (Rosé)",
+      "raw": "🇧🇷 [TÉXTIL] Mochila 4 Rodinhas Fun (Rosé)"
+    },
+    {
+      "mes": "2025-06",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "MIMO",
+      "nome": "Estojo",
+      "raw": "🇧🇷 [MIMO] Estojo"
+    },
+    {
+      "mes": "2025-06",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TÉRMICO",
+      "nome": "Garrafa Pro 750ml",
+      "raw": "🇧🇷 [TÉRMICO] Garrafa Pro 750ml"
+    },
+    {
+      "mes": "2025-05",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TÉXTIL",
+      "nome": "Bolsa Tote Puff (Off White)",
+      "raw": "🇧🇷 [TÉXTIL] Bolsa Tote Puff (Off White)"
+    },
+    {
+      "mes": "2025-05",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TÉXTIL",
+      "nome": "Lancheira Daily",
+      "raw": "🇧🇷 [TÉXTIL] Lancheira Daily"
+    },
+    {
+      "mes": "2025-05",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TÉRMICO",
+      "nome": "Copo Life (600ml)",
+      "raw": "🇧🇷 [TÉRMICO] Copo Life (600ml)"
+    },
+    {
+      "mes": "2025-05",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "MIMO",
+      "nome": "Base de silicone para Copo Life",
+      "raw": "🇧🇷 [MIMO] Base de silicone para Copo Life"
+    },
+    {
+      "mes": "2025-04",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TEXTIL",
+      "nome": "Mini Tote",
+      "raw": "🇧🇷 [TEXTIL] Mini Tote"
+    },
+    {
+      "mes": "2025-04",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TEXTIL",
+      "nome": "Mochila Executiva Slim",
+      "raw": "🇧🇷 [TEXTIL] Mochila Executiva Slim"
+    },
+    {
+      "mes": "2025-03",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "Samsumg A26",
+      "raw": "🇧🇷 [TECH] Samsumg A26"
+    },
+    {
+      "mes": "2025-03",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "Samsumg A36",
+      "raw": "🇧🇷 [TECH] Samsumg A36"
+    },
+    {
+      "mes": "2025-03",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "Samsumg A56",
+      "raw": "🇧🇷 [TECH] Samsumg A56"
+    },
+    {
+      "mes": "2025-03",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TÉRMICO",
+      "nome": "Garrafa Fresh 1200ml",
+      "raw": "🇧🇷 [TÉRMICO] Garrafa Fresh 1200ml"
+    },
+    {
+      "mes": "2025-03",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TÉRMICO",
+      "nome": "Alça Esporte - Copo Life (880ml)",
+      "raw": "🇧🇷 [TÉRMICO] Alça Esporte - Copo Life (880ml)"
+    },
+    {
+      "mes": "2025-03",
+      "status": "Lançado!",
+      "tipo": "Facelift",
+      "categoriaMonday": "TEXTIL",
+      "nome": "Tote daily (Facelift forro colorido) - Marrom, vinho e Bege com marrom",
+      "raw": "🇧🇷 [TEXTIL] Tote daily (Facelift forro colorido) - Marrom, vinho e Bege com marrom"
+    },
+    {
+      "mes": "2025-03",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "MIMO",
+      "nome": "Esponja de maquiagem",
+      "raw": "🇧🇷 [MIMO] Esponja de maquiagem"
+    },
+    {
+      "mes": "2025-03",
+      "status": "Lançado!",
+      "tipo": "Novas Cores",
+      "categoriaMonday": "TEXTIL",
+      "nome": "Necessaire Trip (Off white)",
+      "raw": "🇧🇷 [TEXTIL] Necessaire Trip (Off white)"
+    },
+    {
+      "mes": "2025-02",
+      "status": "Lançado!",
+      "tipo": "",
+      "categoriaMonday": "TEXTIL",
+      "nome": "Mochila Voyage",
+      "raw": "🇧🇷 [TEXTIL] Mochila Voyage"
+    },
+    {
+      "mes": "2025-02",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TEXTIL",
+      "nome": "Bolsa de viagem Joy 2.0",
+      "raw": "🇧🇷 [TEXTIL] Bolsa de viagem Joy 2.0"
+    },
+    {
+      "mes": "2025-02",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TEXTIL",
+      "nome": "Necessaire Voyage",
+      "raw": "🇧🇷 [TEXTIL] Necessaire Voyage"
+    },
+    {
+      "mes": "2025-02",
+      "status": "Lançado!",
+      "tipo": "Facelift",
+      "categoriaMonday": "TEXTIL",
+      "nome": "Mochila Casual Black Label (Facelift forro colorido)",
+      "raw": "🇧🇷 [TEXTIL] Mochila Casual Black Label (Facelift forro colorido)"
+    },
+    {
+      "mes": "2025-02",
+      "status": "Lançado!",
+      "tipo": "Facelift",
+      "categoriaMonday": "TEXTIL",
+      "nome": "Mochila Pop (Facelift forro colorido) - Novas Cores",
+      "raw": "🇧🇷 [TEXTIL] Mochila Pop (Facelift forro colorido) - Novas Cores"
+    },
+    {
+      "mes": "2025-02",
+      "status": "Lançado!",
+      "tipo": "Facelift",
+      "categoriaMonday": "TEXTIL",
+      "nome": "Lancheira Mix (Facelift cores lisas) - Novas cores - marrom, preto e offwhite",
+      "raw": "🇧🇷 [TEXTIL] Lancheira Mix (Facelift cores lisas) - Novas cores - marrom, preto e offwhite"
+    },
+    {
+      "mes": "2025-02",
+      "status": "",
+      "tipo": "Novidade",
+      "categoriaMonday": "MIMO",
+      "nome": "Capa PVC Protetora Mala",
+      "raw": "🇧🇷 [MIMO] Capa PVC Protetora Mala"
+    },
+    {
+      "mes": "2025-02",
+      "status": "",
+      "tipo": "Novidade",
+      "categoriaMonday": "MIMO",
+      "nome": "Borracha Protetora Rodinha",
+      "raw": "🇧🇷 [MIMO] Borracha Protetora Rodinha"
+    },
+    {
+      "mes": "2025-02",
+      "status": "",
+      "tipo": "Novidade",
+      "categoriaMonday": "TÉXTIL",
+      "nome": "Bolsa Tote Puff (Preto e Marrom)",
+      "raw": "🇧🇷 [TÉXTIL] Bolsa Tote Puff (Preto e Marrom)"
+    },
+    {
+      "mes": "2025-01",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "Linha S25 (S25, S24 + e S24 Ultra)",
+      "raw": "🇧🇷 [TECH] Linha S25 (S25, S24 + e S24 Ultra)"
+    },
+    {
+      "mes": "2025-01",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TECH",
+      "nome": "Samsumg A16",
+      "raw": "🇧🇷 [TECH] Samsumg A16"
+    },
+    {
+      "mes": "2025-01",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "MIMO",
+      "nome": "Escovinha de limpeza grande para garrafa",
+      "raw": "🇧🇷 [MIMO] Escovinha de limpeza grande para garrafa"
+    },
+    {
+      "mes": "2025-01",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "MIMO",
+      "nome": "Capa PVC para mala",
+      "raw": "🇧🇷 [MIMO] Capa PVC para mala"
+    },
+    {
+      "mes": "2025-01",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "MIMO",
+      "nome": "Borrachinha silicone p/ rodinha da mala",
+      "raw": "🇧🇷 [MIMO] Borrachinha silicone p/ rodinha da mala"
+    },
+    {
+      "mes": "2025-01",
+      "status": "Lançado!",
+      "tipo": "Facelift",
+      "categoriaMonday": "TÊXTIL",
+      "nome": "Bolsa Moove (Flip - Facelift)",
+      "raw": "🇧🇷 [TÊXTIL] Bolsa Moove (Flip - Facelift)"
+    },
+    {
+      "mes": "2025-01",
+      "status": "Lançado!",
+      "tipo": "Novidade",
+      "categoriaMonday": "TERMICO",
+      "nome": "Copo Life (880mL)",
+      "raw": "🇧🇷 [TERMICO] Copo Life (880mL)"
+    },
+    {
+      "mes": "2025-01",
+      "status": "Lançado!",
+      "tipo": "Novas Cores",
+      "categoriaMonday": "TEXTIL",
+      "nome": "Necessaire (Novas Cores - Azul Claro / Turquesa/ Melancia/Preta/ Off White/ Stich/ Rosa/ Mapa Mundi e Corações Flutuantes)",
+      "raw": "🇧🇷 [TEXTIL] Necessaire (Novas Cores - Azul Claro / Turquesa/ Melancia/Preta/ Off White/ Stich/ Rosa/ Mapa Mundi e Corações Flutuantes)"
+    }
+  ]
+}

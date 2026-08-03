@@ -14,7 +14,8 @@
     "refresh-stamped": "node scripts/refresh-stamped.cjs",
     "refresh-ctr-images": "node scripts/refresh-ctr-images.cjs",
     "refresh-import": "node scripts/refresh-import-costs.cjs",
-    "refresh-estoque": "node scripts/refresh-estoque-canais.cjs"
+    "refresh-estoque": "node scripts/refresh-estoque-canais.cjs",
+    "build-launch-map": "node scripts/build-launch-map-xlsx.cjs"
   },
   "dependencies": {
     "jose": "^5.9.6",

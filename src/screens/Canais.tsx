@@ -13,20 +13,22 @@ interface Props { data: ProcessedData; sales: SalesBySkuPayload; }
 const CANAL_LABEL: Record<CanalGrupo, string> = {
   D2C: 'D2C · Varejo',
   B2B: 'B2B · Resellers',
+  Marketplace: 'Marketplace',
   Lojas: 'Lojas Físicas',
   Brindes: 'Brindes',
 };
 const CANAL_HINT: Record<CanalGrupo, string> = {
   D2C: 'Site Gocase (e-commerce direto ao consumidor)',
   B2B: 'Resellers Brasil — venda atacado via Extrema',
+  Marketplace: 'Marketplaces (Mercado Livre, Amazon, Shopee…)',
   Lojas: 'Totem Iguatemi · Parkshopping · Analia Franco · Totem In Loco',
   Brindes: 'Influenciadores, prototipos, bonificações, requests — qtd inflada, receita ~0',
 };
 const CANAL_ICON: Record<CanalGrupo, string> = {
-  D2C: '🛒', B2B: '🏭', Lojas: '🏬', Brindes: '🎁',
+  D2C: '🛒', B2B: '🏭', Marketplace: '🛍️', Lojas: '🏬', Brindes: '🎁',
 };
 const CANAL_ACCENT: Record<CanalGrupo, 'blue' | 'purple' | 'yellow' | 'green' | 'red'> = {
-  D2C: 'blue', B2B: 'purple', Lojas: 'green', Brindes: 'yellow',
+  D2C: 'blue', B2B: 'purple', Marketplace: 'red', Lojas: 'green', Brindes: 'yellow',
 };
 
 export function Canais({ data, sales }: Props) {

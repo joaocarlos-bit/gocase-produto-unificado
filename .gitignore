@@ -8,3 +8,5 @@ dist
 public/data/*.json
 # arquivos auxiliares
 *.tmp
+
+godeploy/upload/

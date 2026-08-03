@@ -1,6 +1,7 @@
 import type { CanalGrupo } from '../data/types';
 import { CANAL_GRUPOS } from '../data/types';
 import { OnlinePresence } from './OnlinePresence';
+import { ProductApps } from './ProductApps';
 
 interface Props {
   periodFrom: string;
@@ -13,7 +14,7 @@ interface Props {
 }
 
 const CANAL_LABEL: Record<CanalGrupo, string> = {
-  D2C: 'D2C', B2B: 'B2B', Lojas: 'Lojas', Brindes: 'Brindes',
+  D2C: 'D2C', B2B: 'B2B', Marketplace: 'Mktplace', Lojas: 'Lojas', Brindes: 'Brindes',
 };
 
 export function Header({ periodFrom, periodTo, collectedAt, linhasCount, skusCount, canais, onChangeCanais }: Props) {
@@ -53,6 +54,7 @@ export function Header({ periodFrom, periodTo, collectedAt, linhasCount, skusCou
           ))}
         </div>
         <OnlinePresence />
+        <ProductApps />
         <span className="hdr__pill">📦 snapshot · {collectedLabel}</span>
       </div>
       <style>{`
