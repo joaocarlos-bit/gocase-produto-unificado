@@ -1,71 +1,105 @@
-// Gestão › Engenharia — portado do dash-produto (loadEngenhariaFromSheets).
+// Gestão › Engenharia — fonte: Monday.com, board "03 - Warehouse Samples",
+// grupo "Samples 2026". Cada item = uma amostra testada; o mês é definido pela
+// coluna "Date Tested" e o SLA (dias úteis) é calculado entre "Date Received"
+// e "Date Tested" (mesma lógica da coluna fórmula "SLA Teste" do board).
 // 4 KPIs (Total testes YTD, SLA médio, Testes do mês, SLA do mês) + 2 gráficos
-// (barras de testes/mês, linha de SLA com meta ≤7 dias). Fonte: planilha
-// lançamentos, aba "Mês" (gid 975326169) via gviz.
+// (barras de testes/mês, linha de SLA com meta ≤7 dias).
 
 import { useEffect, useState } from 'react';
 import {
-  Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine,
+  Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine,
   ResponsiveContainer, Tooltip, XAxis, YAxis, LabelList,
 } from 'recharts';
 import { Card } from '../../components/Card';
 import { KPICard, Delta } from '../../components/KPICard';
-import { loadSheetViaJSONP, normalizeMes, GESTAO_CONFIG } from '../../data/gviz';
+import { TokenPrompt } from '../../components/TokenPrompt';
+import { MONDAY, getMondayToken, fetchWarehouseSamples, businessDaysInclusive } from '../../data/monday';
 
 interface TesteRow { mes: string; valor: number; }
 interface SlaRow { mes: string; dias: number; }
+interface RazaoRow { motivo: string; qtd: number; }
+interface Reprovacoes { total: number; semMotivo: number; motivos: RazaoRow[]; }
 
-const MES_NOME: Record<string, string> = {
-  Jan: 'Janeiro', Fev: 'Fevereiro', Mar: 'Março', Abr: 'Abril', Mai: 'Maio', Jun: 'Junho',
-  Jul: 'Julho', Ago: 'Agosto', Set: 'Setembro', Out: 'Outubro', Nov: 'Novembro', Dez: 'Dezembro',
+const MES_ABREV = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+const MES_NOME = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const nomeMes = (key?: string) => {
+  const idx = MES_ABREV.indexOf((key || '').split('/')[0]);
+  return idx >= 0 ? MES_NOME[idx] : (key || '');
 };
-const nomeMes = (key?: string) => MES_NOME[(key || '').split('/')[0]] || (key || '').split('/')[0];
 
 type State =
+  | { kind: 'no-token' }
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; testes: TesteRow[]; sla: SlaRow[]; updatedAt: string };
+  | { kind: 'ready'; testes: TesteRow[]; sla: SlaRow[]; slaMediaGeral: number | null; reprovacoes: Reprovacoes; updatedAt: string };
 
 export function Engenharia() {
-  const [state, setState] = useState<State>({ kind: 'loading' });
+  const [state, setState] = useState<State>(() => (getMondayToken() ? { kind: 'loading' } : { kind: 'no-token' }));
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
+    if (!getMondayToken()) { setState({ kind: 'no-token' }); return; }
     let cancelled = false;
     setState({ kind: 'loading' });
     (async () => {
       try {
-        const rows = await loadSheetViaJSONP({
-          sheetId: GESTAO_CONFIG.sheets.lancamentos,
-          colNames: ['Mês', 'C1', 'C2', 'C3', 'C4'],
-          gid: GESTAO_CONFIG.sheets.engenhariaGid,
-        });
+        const token = getMondayToken();
+        const items = await fetchWarehouseSamples(token, MONDAY.boards.warehouseSamples, MONDAY.groups.warehouseSamples2026);
 
-        const seenTestes = new Map<string, number>();
-        const seenSla = new Map<string, number>();
-        rows.forEach((r) => {
-          const mes = normalizeMes(String(r['Mês'] || '').trim());
-          if (!mes || !/^[A-Za-zÀ-ÿ]{3}\/\d{2}$/.test(mes)) return;
-          if (!seenTestes.has(mes)) {
-            const testes = parseInt(String(r['C1'] || '').replace(/[^\d]/g, '')) || 0;
-            seenTestes.set(mes, testes);
-          }
-          if (!seenSla.has(mes)) {
-            for (const k of ['C1', 'C2', 'C3', 'C4']) {
-              const v = parseFloat(String(r[k] || '').replace(',', '.').replace(/[^\d.]/g, ''));
-              if (!isNaN(v) && v >= 1 && v <= 90 && v !== seenTestes.get(mes)) {
-                seenSla.set(mes, v);
-                break;
-              }
+        const year = new Date().getFullYear();
+        const testesPorMes = new Map<number, number>();
+        const slaSomaPorMes = new Map<number, { soma: number; n: number }>();
+
+        // Média geral do ano (item a item, todos os itens testados em `year`
+        // com SLA calculável) — mesma lógica de dias úteis da coluna "SLA
+        // Teste" do Monday, mas restrita ao ano corrente.
+        let slaSomaGeral = 0, slaNGeral = 0;
+
+        items.forEach((it) => {
+          if (!it.dateTested) return;
+          const d = new Date(it.dateTested + 'T00:00:00');
+          if (isNaN(d.getTime()) || d.getFullYear() !== year) return;
+          const mes = d.getMonth();
+          testesPorMes.set(mes, (testesPorMes.get(mes) || 0) + 1);
+          if (it.dateReceived) {
+            const dias = businessDaysInclusive(it.dateReceived, it.dateTested);
+            if (dias != null) {
+              const acc = slaSomaPorMes.get(mes) || { soma: 0, n: 0 };
+              acc.soma += dias; acc.n += 1;
+              slaSomaPorMes.set(mes, acc);
+              slaSomaGeral += dias; slaNGeral += 1;
             }
           }
         });
 
-        const testes = [...seenTestes.entries()].map(([mes, valor]) => ({ mes, valor }));
-        const sla = [...seenSla.entries()].map(([mes, dias]) => ({ mes, dias }));
-        if (!testes.length) throw new Error('Sem dados na aba');
+        const mesesOrdenados = [...testesPorMes.keys()].sort((a, b) => a - b);
+        const testes: TesteRow[] = mesesOrdenados.map((m) => ({ mes: `${MES_ABREV[m]}/${String(year).slice(-2)}`, valor: testesPorMes.get(m) || 0 }));
+        const sla: SlaRow[] = mesesOrdenados
+          .filter((m) => slaSomaPorMes.has(m))
+          .map((m) => { const acc = slaSomaPorMes.get(m)!; return { mes: `${MES_ABREV[m]}/${String(year).slice(-2)}`, dias: acc.soma / acc.n }; });
+        const slaMediaGeral = slaNGeral ? slaSomaGeral / slaNGeral : null;
+
+        // Principais motivos de reprovação (coluna "Razão", multi-select) —
+        // apenas itens com Approval = "Not Approved" testados em `year`.
+        const naoAprovados = items.filter((it) => {
+          if (it.approval !== 'Not Approved' || !it.dateTested) return false;
+          const d = new Date(it.dateTested + 'T00:00:00');
+          return !isNaN(d.getTime()) && d.getFullYear() === year;
+        });
+        const motivoCounts = new Map<string, number>();
+        let semMotivo = 0;
+        naoAprovados.forEach((it) => {
+          if (!it.razao.length) { semMotivo += 1; return; }
+          it.razao.forEach((r) => motivoCounts.set(r, (motivoCounts.get(r) || 0) + 1));
+        });
+        const motivos: RazaoRow[] = [...motivoCounts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([motivo, qtd]) => ({ motivo, qtd }));
+        const reprovacoes: Reprovacoes = { total: naoAprovados.length, semMotivo, motivos };
+
+        if (!testes.length) throw new Error(`Sem itens testados em ${year} no grupo "Samples ${year}"`);
         if (cancelled) return;
-        setState({ kind: 'ready', testes, sla, updatedAt: new Date().toLocaleString('pt-BR') });
+        setState({ kind: 'ready', testes, sla, slaMediaGeral, reprovacoes, updatedAt: new Date().toLocaleString('pt-BR') });
       } catch (e: any) {
         if (cancelled) return;
         setState({ kind: 'error', message: String(e?.message || e) });
@@ -74,8 +108,9 @@ export function Engenharia() {
     return () => { cancelled = true; };
   }, [reloadKey]);
 
+  if (state.kind === 'no-token') return <TokenPrompt tab="Engenharia" onSaved={() => setReloadKey((k) => k + 1)} />;
   if (state.kind === 'loading') {
-    return <div className="g-status"><span className="spinner" /> Carregando dados de Engenharia…</div>;
+    return <div className="g-status"><span className="spinner" /> Carregando dados de Engenharia do Monday…</div>;
   }
   if (state.kind === 'error') {
     return (
@@ -86,10 +121,8 @@ export function Engenharia() {
     );
   }
 
-  const { testes, sla, updatedAt } = state;
+  const { testes, sla, slaMediaGeral: slaMedia, reprovacoes, updatedAt } = state;
   const totalYTD = testes.reduce((s, d) => s + d.valor, 0);
-  const slaVals = sla.map((d) => d.dias);
-  const slaMedia = slaVals.length ? slaVals.reduce((a, b) => a + b, 0) / slaVals.length : null;
   const lastTestes = [...testes].reverse().find((d) => d.valor > 0) || null;
   const prevTestes = lastTestes ? [...testes].reverse().find((d) => d.valor > 0 && d.mes !== lastTestes.mes) || null : null;
   const lastSla = sla.length ? sla[sla.length - 1] : null;
@@ -104,7 +137,7 @@ export function Engenharia() {
   const slaMesDelta = diasDelta(lastSla?.dias, prevSla?.dias);
 
   const chartTestes = testes.map((d) => ({ mes: d.mes, valor: d.valor }));
-  const chartSla = sla.map((d) => ({ mes: d.mes, dias: d.dias }));
+  const chartSla = sla.map((d) => ({ mes: d.mes, dias: Math.round(d.dias * 10) / 10 }));
 
   return (
     <div className="g-eng">
@@ -129,7 +162,7 @@ export function Engenharia() {
       </div>
 
       <div className="g-eng__charts">
-        <Card title="Testes por mês" subtitle={`Total acumulado: ${totalYTD} testes em 2026`}>
+        <Card title="Testes por mês" subtitle={`Total acumulado: ${totalYTD} testes em ${new Date().getFullYear()}`}>
           <div style={{ height: 280 }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartTestes} margin={{ top: 24, right: 8, left: -12, bottom: 0 }}>
@@ -164,12 +197,37 @@ export function Engenharia() {
         </Card>
       </div>
 
+      <div className="g-eng__reasons">
+        <Card title="Principais motivos de reprovação"
+          subtitle={`${reprovacoes.total} reprovações em ${new Date().getFullYear()}${reprovacoes.semMotivo ? ` · ${reprovacoes.semMotivo} sem motivo registrado` : ''}`}>
+          {reprovacoes.motivos.length === 0 ? (
+            <div className="g-status">Nenhuma reprovação com motivo registrado no período.</div>
+          ) : (
+            <div style={{ height: Math.max(180, reprovacoes.motivos.length * 34) }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={reprovacoes.motivos} layout="vertical" margin={{ top: 8, right: 24, left: 8, bottom: 0 }}>
+                  <CartesianGrid stroke="var(--border)" horizontal={false} />
+                  <XAxis type="number" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: 'var(--text-2)' }} allowDecimals={false} />
+                  <YAxis type="category" dataKey="motivo" tickLine={false} axisLine={false} width={220}
+                    tick={{ fontSize: 11, fill: 'var(--text-2)' }} />
+                  <Tooltip cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
+                  <Bar dataKey="qtd" fill="var(--red)" radius={[0, 6, 6, 0]} maxBarSize={22}>
+                    <LabelList dataKey="qtd" position="right" style={{ fontSize: 11, fontWeight: 700, fill: 'var(--text)' }} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Card>
+      </div>
+
       <style>{`
         .g-eng__head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }
         .g-eng__title { font-size: 22px; font-weight: 800; color: var(--text); }
         .g-eng__meta { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-3); }
         .g-eng__kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
         .g-eng__charts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .g-eng__reasons { margin-top: 14px; }
         .g-retry { font-size: 11px; font-weight: 700; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); }
         .g-retry:hover { background: var(--border); color: var(--text); }
         .g-status { display: flex; align-items: center; gap: 10px; padding: 40px; color: var(--text-2); font-size: 13px; }

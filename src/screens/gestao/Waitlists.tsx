@@ -199,11 +199,11 @@ export function Waitlists() {
       const qtdCol = allCols.find(c => /^qtd(ade)?[e.]?$/i.test(c.trim()) || c.toLowerCase().includes('quantidade') || c.toLowerCase().startsWith('qtd'));
       console.log('[ColorAnalysis] nomeCol:', nomeCol, '| corCol:', corCol, '| qtdCol:', qtdCol);
 
-      const productLower = produto.toLowerCase().trim();
-      const filtered = rows.filter((r) => {
-        const nome = (r[nomeCol] || '').toLowerCase().trim();
-        return nome.length > 0 && (nome === productLower || nome.includes(productLower));
-      });
+      // Match exato (normalizado): evita que "Shoulder Bag" capture também
+      // "Shoulder Bag Moon" via substring — nomes de produto costumam ser
+      // prefixo uns dos outros, então "includes" causa cruzamento de dados.
+      const productNorm = normalizeProductName(produto);
+      const filtered = rows.filter((r) => normalizeProductName(r[nomeCol] || '') === productNorm);
       console.log('[ColorAnalysis] produto:', produto, '| linhas filtradas:', filtered.length);
 
       const corMap: Record<string, number> = {};
