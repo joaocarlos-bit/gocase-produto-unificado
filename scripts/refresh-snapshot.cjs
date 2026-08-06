@@ -28,6 +28,9 @@ loadEnv();
 // ── Config (fonte = Excel no SharePoint via Microsoft Graph) ─────────────
 // Migrado do Google Sheets em 2026-06. App registration "gocase-produto-refresh"
 // (Entra ID, tenant Gocase). Backup do script Google: refresh-snapshot.google.cjs.bak
+// Em 2026-07 a aba Sales passou a vir direto do Metabase (link público, sem
+// auth) — ver METABASE_SALES_URL abaixo. TicketSense/SlowMoving continuam
+// vindo do Excel do SharePoint via Graph.
 const GRAPH_CLIENT_ID = process.env.GRAPH_CLIENT_ID;
 const GRAPH_TENANT_ID = process.env.GRAPH_TENANT_ID;
 const SHAREPOINT_FILE_URL = process.env.SHAREPOINT_FILE_URL;
@@ -39,6 +42,52 @@ const SHAREPOINT_FILE_LOCAL = process.env.SHAREPOINT_FILE_LOCAL;
 if (!SHAREPOINT_FILE_LOCAL && (!GRAPH_CLIENT_ID || !GRAPH_TENANT_ID || !SHAREPOINT_FILE_URL)) {
   console.error('✗ Defina SHAREPOINT_FILE_LOCAL (modo arquivo local) OU GRAPH_CLIENT_ID/GRAPH_TENANT_ID/SHAREPOINT_FILE_URL (modo Graph) em .env.local');
   process.exit(1);
+}
+
+// ── Metabase: base de vendas (link público — sem token, sem CORS) ────────
+// Question "2e63a932…" é a tabela-fato de vendas do grupo inteiro (9 marcas).
+// Filtramos aqui pra Gocase e, por ora, deixamos de fora o canal Marketplace
+// (a pedido — ainda não mapeado pra D2C/B2B/Lojas/Brindes).
+const METABASE_SALES_URL = process.env.METABASE_SALES_URL
+  || 'https://metabase.gocase.com.br/public/question/2e63a932-4ec5-4bac-b64a-365951bbf869.json';
+const METABASE_EMPRESA = 'Gocase';
+const METABASE_CANAIS_EXCLUIDOS = ['Marketplace'];
+
+/** Normaliza variações de capitalização vindas do Metabase (ex: "descontinuado"). */
+function normalizeStatus(s) {
+  const t = String(s || '').trim();
+  return t.toLowerCase() === 'descontinuado' ? 'Descontinuado' : t;
+}
+
+/**
+ * Baixa a exportação JSON pública da question de vendas do Metabase e
+ * devolve linhas no MESMO formato que sheetToObjects() (chaves como na aba
+ * Sales do Excel), pra reaproveitar o pipeline de agregação sem mudanças.
+ */
+async function fetchMetabaseSales(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '');
+    throw new Error(`Metabase HTTP ${resp.status}: ${txt.slice(0, 300)}`);
+  }
+  const rows = await resp.json();
+  if (!Array.isArray(rows)) throw new Error('Resposta do Metabase não é um array de linhas');
+  return rows
+    .filter((r) => r.empresa === METABASE_EMPRESA && !METABASE_CANAIS_EXCLUIDOS.includes(r.canal))
+    .map((r) => ({
+      'Linha': r.linha || '',
+      'Categoria': r.categoria || '',
+      'SKU Único': r.chave || '',
+      'Status': normalizeStatus(r.status),
+      'Quantidade': r.quantidade,
+      'Faturamento': r.faturamento,
+      'Valor Unitário': r.ticket,
+      'Mês': r.mes,
+      'Ano': r.ano,
+      'Data': r.data,
+      'Canal': r.canal,
+      'Natureza': r.natureza,
+    }));
 }
 
 const OUT_PROCESSED  = path.resolve(__dirname, '../public/data/processed-data.json');
@@ -232,12 +281,9 @@ async function main() {
   const wb = XLSX.read(buf, { type: 'buffer' });
   console.log(`  abas no workbook: ${wb.SheetNames.join(' · ')}`);
 
-  console.log('▶ Lendo Sales…');
-  // Histórico completo agora vem na própria aba Sales (Jan/25 →). O backfill
-  // via Google gviz foi removido na migração pro SharePoint.
-  const salesSheet = sheetToObjects(wb, ['Sales', 'Sales_refined', 'Vendas']);
-  const salesRaw = salesSheet.rows;
-  console.log(`  aba "${salesSheet.name}": ${salesRaw.length} linhas`);
+  console.log(`▶ Lendo Sales do Metabase (empresa=${METABASE_EMPRESA})…`);
+  const salesRaw = await fetchMetabaseSales(METABASE_SALES_URL);
+  console.log(`  ${salesRaw.length} linhas (canais excluídos: ${METABASE_CANAIS_EXCLUIDOS.join(', ') || '—'})`);
 
   console.log('▶ Lendo TicketSense…');
   const costsRaw = sheetToObjects(wb, ['TicketSense', 'Ticket Sense', 'Ticket']).rows;

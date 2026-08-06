@@ -14,6 +14,8 @@ export const MONDAY = {
   },
   groups: {
     warehouseSamples2026: 'group_title', // grupo "Samples 2026" do board 03 - Warehouse Samples
+    portfolioOkr262: 'group_mm5rjfqh', // grupo "OKRs 26.2" do board 04 - Project Portfolio Management
+    portfolioIaTech: 'group_mm1zd2t2', // grupo "Projetos de IA/Tech" do board 04 - Project Portfolio Management
   },
   columns: {
     portfolio: {
@@ -29,6 +31,17 @@ export const MONDAY = {
       dateTested: 'date__1', // "Date Tested"
       approval: 'status_1__1', // "Approval" (Approved / Not Approved / Approved w/ Restriction / Waiting / No Test Needed)
       razao: 'dropdown_mm122nkz', // "Razão" — motivo(s) de reprovação (multi-select, texto separado por vírgula)
+      relatorio: 'file_mkyhct24', // "Relatorio Arquivo" — link (ex.: Google Sheets) do relatório do teste
+    },
+    launches2026: {
+      people: 'multiple_person_mkt1ez1j', // "People"
+      launchStatus: 'status33', // "Launch status"
+      dificuldade: 'color_mkt95wfd', // "Nível de dificuldade" (Baixo/Médio/Alto)
+    },
+    launches2027: {
+      people: 'person', // "People"
+      launchStatus: 'color_mm38he5h', // "Launch status"
+      dificuldade: 'color_mm39ykd4', // "Nível" (Baixo/Médio/Alto/Crítico)
     },
   },
 };
@@ -122,6 +135,65 @@ export async function fetchPortfolio(token: string): Promise<MondayItem[]> {
   return items;
 }
 
+// ── Alocação de Recurso (People + Launch status dos boards de Lançamentos) ──
+export interface LaunchAllocItem {
+  id: string; name: string; people: string[]; launchStatus: string | null; dificuldade: string | null; group: string; launched: boolean;
+}
+
+const LAUNCHED_RE = /launched|lan[çc]ad[oa]/i;
+
+/** Busca id/nome/pessoas/status/dificuldade de lançamento de todos os itens de
+ *  um board de Lançamentos (2026 ou 2027), paginando por cursor. `launched` =
+ *  true quando o "Launch status" indica que já foi lançado (qualquer variação
+ *  de "Launched"/"Lançado"), incluindo lançamentos fora do prazo. */
+export async function fetchLaunchAllocation(
+  token: string, boardId: number, peopleColId: string, statusColId: string, difficultyColId: string,
+): Promise<LaunchAllocItem[]> {
+  const items: LaunchAllocItem[] = [];
+  let cursor: string | null = null;
+  do {
+    const cursorPart = cursor ? `, cursor: "${cursor}"` : '';
+    const query = `{
+      boards(ids: [${boardId}]) {
+        items_page(limit: 200${cursorPart}) {
+          cursor
+          items {
+            id name
+            group { id title }
+            column_values(ids: ["${peopleColId}","${statusColId}","${difficultyColId}"]) { id text }
+          }
+        }
+      }
+    }`;
+    const json = await gql(token, query);
+    const page = json.data?.boards?.[0]?.items_page;
+    if (!page) throw new Error('Resposta inesperada da API');
+    (page.items || []).forEach((it: MondayItem) => {
+      const cvs = it.column_values || [];
+      const peopleText = cvs.find((c) => c.id === peopleColId)?.text || '';
+      const launchStatus = cvs.find((c) => c.id === statusColId)?.text || null;
+      const dificuldade = cvs.find((c) => c.id === difficultyColId)?.text || null;
+      items.push({
+        id: it.id,
+        name: it.name,
+        people: peopleText.split(',').map((s) => s.trim()).filter(Boolean),
+        launchStatus,
+        dificuldade,
+        group: it.group?.title || 'Sem grupo',
+        launched: LAUNCHED_RE.test(launchStatus || ''),
+      });
+    });
+    cursor = page.cursor || null;
+  } while (cursor);
+  return items;
+}
+
+/** true quando o item ainda não foi lançado e está num grupo de mês (exclui
+ *  "Sem previsão", "Cancelados" e qualquer outro grupo que não seja um mês). */
+export function isPendingLaunch(it: LaunchAllocItem): boolean {
+  return !it.launched && parseGroupMonth(it.group) !== null;
+}
+
 // ── Atualizações de Lançamentos (updates por item do board 2026) ─────────
 export interface LancUpdate { text: string; ts: number; creator: string | null; }
 export interface LancUpdateItem { id: string; name: string; group: string; updates: LancUpdate[]; }
@@ -151,14 +223,15 @@ export async function fetchLancUpdates(token: string): Promise<LancUpdateItem[]>
 export interface WarehouseSampleItem {
   id: string; name: string;
   dateReceived: string | null; dateTested: string | null;
-  approval: string | null; razao: string[];
+  approval: string | null; razao: string[]; relatorioUrl: string | null;
 }
 
 /** Busca os itens do grupo "Samples 2026" do board 03 - Warehouse Samples, com
- *  as datas de Recebimento/Teste, o status de Aprovação e o(s) motivo(s) de
- *  reprovação ("Razão", multi-select), paginando por cursor. */
+ *  as datas de Recebimento/Teste, o status de Aprovação, o(s) motivo(s) de
+ *  reprovação ("Razão", multi-select) e o link do "Relatorio Arquivo",
+ *  paginando por cursor. */
 export async function fetchWarehouseSamples(token: string, boardId: number, groupId: string): Promise<WarehouseSampleItem[]> {
-  const { dateReceived: recvId, dateTested: testId, approval: approvalId, razao: razaoId } = MONDAY.columns.warehouseSamples;
+  const { dateReceived: recvId, dateTested: testId, approval: approvalId, razao: razaoId, relatorio: relatorioId } = MONDAY.columns.warehouseSamples;
   const items: WarehouseSampleItem[] = [];
   let cursor: string | null = null;
   do {
@@ -170,7 +243,7 @@ export async function fetchWarehouseSamples(token: string, boardId: number, grou
           items {
             id name
             group { id title }
-            column_values(ids: ["${recvId}","${testId}","${approvalId}","${razaoId}"]) { id text }
+            column_values(ids: ["${recvId}","${testId}","${approvalId}","${razaoId}","${relatorioId}"]) { id text }
           }
         }
       }
@@ -183,6 +256,7 @@ export async function fetchWarehouseSamples(token: string, boardId: number, grou
       .forEach((it: MondayItem) => {
         const cvs = it.column_values || [];
         const razaoText = cvs.find((c) => c.id === razaoId)?.text || '';
+        const relatorioText = cvs.find((c) => c.id === relatorioId)?.text || '';
         items.push({
           id: it.id,
           name: it.name,
@@ -190,6 +264,7 @@ export async function fetchWarehouseSamples(token: string, boardId: number, grou
           dateTested: cvs.find((c) => c.id === testId)?.text || null,
           approval: cvs.find((c) => c.id === approvalId)?.text || null,
           razao: razaoText.split(',').map((s) => s.trim()).filter(Boolean),
+          relatorioUrl: /^https?:\/\//.test(relatorioText) ? relatorioText : null,
         });
       });
     cursor = page.cursor || null;
