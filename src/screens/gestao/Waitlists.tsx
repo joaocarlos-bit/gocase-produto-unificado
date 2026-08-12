@@ -99,6 +99,7 @@ export function Waitlists() {
     error?: string;
   } | null>(null);
   const colorCacheRef = useRef<Record<string, string>[] | null>(null);
+  const shopifyLeadCacheRef = useRef<Record<string, string>[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,10 +140,10 @@ export function Waitlists() {
       setCarousel({ label: produto, urls: [], idx: 0, loading: false });
     }
   };
-  // Abre imagens de um teste CTR. Tenta em ordem:
+  // Abre imagens de um teste CTR. Tenta, em ordem de prioridade:
   // 1) manifesto local (dist/imagens/testes/{nome}/)
-  // 2) manifesto CTR do Drive via JSONP (ENDPOINT_CTR)
-  // 3) manifesto Waitlist do Drive (mesmo produto, outra campanha)
+  // 2) manifesto CTR do Drive via JSONP (ENDPOINT_CTR) — buscado em paralelo com o 3
+  // 3) manifesto Waitlist do Drive (mesmo produto, outra campanha) — buscado em paralelo com o 2
   // 4) URL da coluna "Imagem" da planilha
   const openCtrProduct = async (nome: string, fallbackUrl?: string) => {
     setCarousel({ label: nome, urls: [], idx: 0, loading: true });
@@ -165,12 +166,20 @@ export function Waitlists() {
       if (hit?.urls?.length) { setCarousel({ label: nome, urls: hit.urls, idx: 0, loading: false }); return; }
     }
 
-    // 2+3. Manifestos CTR e Waitlist (via Drive), com cascata exato→fuzzy em ambos
-    try {
-      const [ctrMap, wlMap] = await Promise.all([loadCtrImages(), loadDriveImages()]);
-      const urls = resolveDriveIds(clean, [ctrMap, wlMap]).map((id) => driveImageUrl(id, 1200));
+    // 2+3. Manifestos CTR e Waitlist (via Drive), com cascata exato→fuzzy em ambos.
+    // allSettled (não all): se um dos Apps Scripts falhar/estourar, o outro ainda
+    // resolve. Em paralelo o tempo total é o MAIOR dos dois, não a soma — o
+    // endpoint sem cache chega a ~50s.
+    const [ctrResult, wlResult] = await Promise.allSettled([loadCtrImages(), loadDriveImages()]);
+    const manifests = [];
+    if (ctrResult.status === 'fulfilled') manifests.push(ctrResult.value);
+    if (wlResult.status === 'fulfilled') manifests.push(wlResult.value);
+    if (manifests.length > 0) {
+      // resolveDriveIds embute a cascata exato → chave⊂nome → prefixo(nome)⊂chave
+      // e usa o nome LIMPO (sem [VIDEO]/sufixo de cor), que casa mais que o cru.
+      const urls = resolveDriveIds(clean, manifests).map((id) => driveImageUrl(id, 1200));
       if (urls.length > 0) { setCarousel({ label: nome, urls, idx: 0, loading: false }); return; }
-    } catch { /* segue para o fallback da planilha */ }
+    }
 
     // 4. Coluna "Imagem" da planilha
     const fallbackUrls = fromFallbackUrl();
@@ -207,13 +216,45 @@ export function Waitlists() {
       console.log('[ColorAnalysis] produto:', produto, '| linhas filtradas:', filtered.length);
 
       const corMap: Record<string, number> = {};
-      filtered.forEach((r) => {
-        const cor = (r[corCol] || '').trim();
-        if (!cor) return;
-        const qty = qtdCol ? parseSheetNum(r[qtdCol]) : 1;
-        if (qty <= 0) return;
-        corMap[cor] = (corMap[cor] || 0) + qty;
-      });
+
+      if (filtered.length > 0) {
+        filtered.forEach((r) => {
+          const cor = (r[corCol] || '').trim();
+          if (!cor) return;
+          const qty = qtdCol ? parseSheetNum(r[qtdCol]) : 1;
+          if (qty <= 0) return;
+          corMap[cor] = (corMap[cor] || 0) + qty;
+        });
+      } else {
+        // Teste ausente na base principal → é um teste feito via Shopify (não
+        // pelo sistema padrão de waitlist), cujos leads ficam na aba "Lead
+        // Shopify" da planilha de waitlist. A cor não vem em coluna própria:
+        // é o sufixo do "Título do Produto" (ex.: "Tote Pop - Vinho" → "Vinho").
+        if (!shopifyLeadCacheRef.current) {
+          shopifyLeadCacheRef.current = await loadSheetDynamic({
+            sheetId: GESTAO_CONFIG.sheets.waitlist,
+            sheetName: 'Lead Shopfy', // nome real da aba na planilha (com o typo)
+          });
+        }
+        const shopifyRows = shopifyLeadCacheRef.current;
+        const shopifyCols = shopifyRows.length > 0 ? Object.keys(shopifyRows[0]) : [];
+        const testeCol = shopifyCols.find((c) => c.toLowerCase() === 'teste') || 'Teste';
+        const tituloCol = shopifyCols.find((c) => c.toLowerCase().replace(/í/g, 'i').includes('titulo do produto'))
+          || shopifyCols.find((c) => c.toLowerCase().replace(/í/g, 'i').includes('titulo'))
+          || 'Título do Produto';
+
+        const shopifyFiltered = shopifyRows.filter((r) => normalizeProductName(r[testeCol] || '') === productNorm);
+        console.log('[ColorAnalysis] fallback Lead Shopify | linhas filtradas:', shopifyFiltered.length);
+
+        shopifyFiltered.forEach((r) => {
+          const titulo = (r[tituloCol] || '').trim();
+          if (!titulo) return;
+          const idx = titulo.lastIndexOf(' - ');
+          const cor = (idx >= 0 ? titulo.slice(idx + 3) : titulo).trim();
+          if (!cor) return;
+          corMap[cor] = (corMap[cor] || 0) + 1;
+        });
+      }
 
       const data = Object.entries(corMap)
         .map(([cor, quantidade]) => ({ cor, quantidade }))
