@@ -257,6 +257,7 @@ export function allMonthsWithCurrent(data: ProcessedData): Ym[] {
     const end: Ym = currentYm > data.meta.period.to ? currentYm : data.meta.period.to;
     const out: Ym[] = [];
     let [y, m] = start.split('-').map(Number);
+    if (!Number.isFinite(y) || !Number.isFinite(m)) return [currentYm];
     while (true) {
       const ym: Ym = `${y}-${String(m).padStart(2, '0')}`;
       out.push(ym);
