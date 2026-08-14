@@ -1563,7 +1563,7 @@ export function buildMaterialLancamentos(
       out.push(withReal({
         tipo: 'A',
         sku,
-        nomeMaterial: sku,
+        nomeMaterial: stock.nomeUnico || sku,
         linha: item.linha,
         categoria: item.categoria,
         status: stock.status || item.status,
@@ -1581,10 +1581,11 @@ export function buildMaterialLancamentos(
     const sd = data.salesByLinha[linha];
     const status = sd?.status ?? '—';
     for (const item of ext.skus) {
+      const stock = data.STOCK_MAP[item.sku];
       out.push(withReal({
         tipo: 'B',
         sku: item.sku,
-        nomeMaterial: item.nomeMaterial || item.sku,
+        nomeMaterial: stock?.nomeUnico || item.nomeMaterial || item.sku,
         linha,
         categoria: ext.categoria,
         status,
