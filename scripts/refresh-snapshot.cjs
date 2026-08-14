@@ -460,8 +460,9 @@ async function main() {
     const mediaDiaria = pNum(_col(r, ['Média_Diária', 'Media_Diaria', 'Média Diária', 'Media Diaria']));
     const saida3d = pNum(_col(r, ['Saída 3d', 'Saida 3d', 'saida3d', 'Saída 3 dias'])) || mediaDiaria;
     const saida7d = pNum(_col(r, ['Saída 7d', 'Saida 7d', 'saida7d', 'Saída 7 dias'])) || mediaDiaria;
+    const nomeUnico = _col(r, ['Nome Único', 'Nome Unico']);
     if (!sku) continue;
-    STOCK_MAP[sku] = { categoria, linha, status, curva, estoqueTotal: estoque, custo, saida3d, saida7d };
+    STOCK_MAP[sku] = { categoria, linha, nomeUnico, status, curva, estoqueTotal: estoque, custo, saida3d, saida7d };
   }
   // Agrega por linha
   for (const s of Object.values(STOCK_MAP)) {

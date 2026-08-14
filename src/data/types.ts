@@ -65,6 +65,8 @@ export interface TypeBExtension {
 export interface StockSku {
   categoria: Categoria;
   linha: string;
+  /** Nome completo do material (ex.: "Tote Pop Preta") — valor bruto de "Nome Único" na planilha SlowMoving. */
+  nomeUnico: string;
   status: Status;
   curva: CurvaABC;
   estoqueTotal: number;
