@@ -12,6 +12,7 @@
  *   - STAMPED_PUBLIC_KEY       (stamped-reviews)
  *   - STAMPED_PRIVATE_KEY      (stamped-reviews)
  *   - STAMPED_STORE_HASH       (stamped-reviews)
+ *   - SHEETS_API_KEY           (sheets — leitura via Google Sheets API v4)
  */
 
 interface Env {
@@ -20,6 +21,7 @@ interface Env {
   STAMPED_PUBLIC_KEY?: string;
   STAMPED_PRIVATE_KEY?: string;
   STAMPED_STORE_HASH?: string;
+  SHEETS_API_KEY?: string;
   [key: string]: unknown;
 }
 
@@ -52,6 +54,8 @@ export default {
     if (path === '/api/comments') return handleComments(request, env);
     if (path === '/api/presence') return handlePresence(request, env);
     if (path === '/api/stamped-reviews') return handleStamped(request, env);
+    if (path === '/api/sheets') return handleSheets(request, env);
+    if (path === '/api/sales-proxy') return handleSalesProxy(request);
 
     // Qualquer outra rota é responsabilidade do asset layer / SPA fallback.
     return json(404, { error: 'Rota não encontrada' });
@@ -260,4 +264,151 @@ function clampInt(raw: string | null, min: number, max: number, def: number): nu
   const n = parseInt(raw, 10);
   if (!Number.isFinite(n)) return def;
   return Math.max(min, Math.min(max, n));
+}
+
+/* ------------------------------------------------------------------- sheets */
+//
+// Substitui a leitura via gviz (JSONP direto do navegador pro Google) por
+// Google Sheets API v4, chamada aqui no worker com uma API key guardada em
+// secret. Motivo: um Filtro comum (não "modo de exibição de filtro") aplicado
+// na planilha esconde linhas também da leitura via gviz — a API v4 lê os
+// valores "crus" da planilha, ignorando filtros.
+//
+// Cache em memória (por instância do worker) do mapeamento gid → título da
+// aba, pra evitar uma chamada extra de metadata a cada request repetido no
+// mesmo isolate. Best-effort — não é persistente entre deploys/instâncias.
+const gidTitleCache = new Map<string, string>();
+
+async function resolveSheetTitle(sheetId: string, gid: string, apiKey: string): Promise<string | null> {
+  const cacheKey = `${sheetId}:${gid}`;
+  const cached = gidTitleCache.get(cacheKey);
+  if (cached) return cached;
+
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(sheetId)}?fields=sheets.properties&key=${encodeURIComponent(apiKey)}`;
+  const r = await fetch(url);
+  if (!r.ok) return null;
+  const data: any = await r.json().catch(() => null);
+  const sheets = data?.sheets || [];
+  const match = sheets.find((s: any) => String(s?.properties?.sheetId) === String(gid));
+  const title = match?.properties?.title as string | undefined;
+  if (title) gidTitleCache.set(cacheKey, title);
+  return title || null;
+}
+
+async function handleSheets(request: Request, env: Env): Promise<Response> {
+  if (!getSession(request)) return json(401, { error: 'Não autenticado' });
+
+  const apiKey = env.SHEETS_API_KEY;
+  if (!apiKey) {
+    return json(500, { error: 'Sheets API não configurada: defina SHEETS_API_KEY via setAppSecret.' });
+  }
+
+  const url = new URL(request.url);
+  const sheetId = url.searchParams.get('sheetId');
+  const gid = url.searchParams.get('gid');
+  let sheetName = url.searchParams.get('sheetName');
+
+  if (!sheetId) return json(400, { error: 'sheetId é obrigatório' });
+  if (!sheetName && !gid) return json(400, { error: 'sheetName ou gid é obrigatório' });
+
+  try {
+    if (!sheetName && gid) {
+      sheetName = await resolveSheetTitle(sheetId, gid, apiKey);
+      if (!sheetName) return json(404, { error: `Aba com gid ${gid} não encontrada nessa planilha.` });
+    }
+
+    const range = `'${(sheetName as string).replace(/'/g, "\\'")}'`;
+    const target =
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(sheetId)}/values/${encodeURIComponent(range)}` +
+      `?valueRenderOption=FORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING&key=${encodeURIComponent(apiKey)}`;
+
+    const r = await fetch(target);
+    if (!r.ok) {
+      const errBody: any = await r.json().catch(() => ({}));
+      const msg = errBody?.error?.message || `Sheets API HTTP ${r.status}`;
+      // 400 aqui geralmente significa "aba não existe" — repassa como 404
+      // pra ficar consistente com o fluxo de tentativa-de-várias-abas do front.
+      return json(r.status === 400 ? 404 : r.status, { error: msg });
+    }
+
+    const data: any = await r.json();
+    const values: string[][] = data.values || [];
+    return new Response(JSON.stringify({ values }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, max-age=30' },
+    });
+  } catch (e) {
+    return json(500, { error: 'Falha ao ler planilha: ' + (e as Error).message });
+  }
+}
+
+/* -------------------------------------------------------------- sales-proxy */
+//
+// Proxy do link público do Metabase (base de vendas do grupo inteiro). O
+// endpoint do Metabase não manda cabeçalho CORS, então o navegador não
+// consegue chamá-lo direto — o worker busca por ele e repassa só as linhas
+// da Gocase (excluindo Marketplace, ainda não mapeado pra D2C/B2B/Lojas/
+// Brindes), já no formato de colunas que o pipeline de agregação espera
+// (mesmas chaves da aba "Sales" do Google Sheets, pra reaproveitar o parser
+// no client sem mudanças). Usado por Visão Geral/Lançamentos/Produto/
+// Portfólio/Estoque (via src/data/liveSnapshot.ts) pra manter os dados
+// sempre atualizados, sem depender de rebuild manual.
+const METABASE_SALES_URL = 'https://metabase.gocase.com.br/public/question/2e63a932-4ec5-4bac-b64a-365951bbf869.json';
+const METABASE_EMPRESA = 'Gocase';
+const METABASE_CANAIS_EXCLUIDOS = ['Marketplace'];
+
+function normalizeStatus(s: unknown): string {
+  const t = String(s || '').trim();
+  return t.toLowerCase() === 'descontinuado' ? 'Descontinuado' : t;
+}
+
+// A pergunta pública do Metabase retorna a base de vendas do grupo inteiro,
+// sem filtro por empresa (isso só acontece abaixo, depois do download) — o
+// payload passa de 140MB+ e pode levar bem mais de um minuto pra baixar por
+// completo. Sem timeout aqui, essa chamada pendura a requisição (às vezes a
+// própria plataforma cancela), e a tela do cliente nunca sai de "Carregando
+// snapshot", já que o fallback pro JSON estático só dispara quando o fetch
+// FALHA — não quando ele está simplesmente lento. Falhando rápido aqui, o
+// fallback funciona como pretendido. Fix definitivo: filtrar por empresa
+// direto na pergunta do Metabase (fora do escopo deste worker).
+const SALES_PROXY_TIMEOUT_MS = 10_000;
+
+async function handleSalesProxy(request: Request): Promise<Response> {
+  if (!getSession(request)) return json(401, { error: 'Não autenticado' });
+
+  try {
+    const r = await fetch(METABASE_SALES_URL, { signal: AbortSignal.timeout(SALES_PROXY_TIMEOUT_MS) });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      return json(502, { error: `Metabase HTTP ${r.status}: ${txt.slice(0, 300)}` });
+    }
+    const rows: any[] = await r.json();
+    if (!Array.isArray(rows)) return json(502, { error: 'Resposta do Metabase não é um array de linhas' });
+
+    const filtered = rows
+      .filter((row) => row.empresa === METABASE_EMPRESA && !METABASE_CANAIS_EXCLUIDOS.includes(row.canal))
+      .map((row) => ({
+        'Linha': row.linha || '',
+        'Categoria': row.categoria || '',
+        'SKU Único': row.chave || '',
+        'Status': normalizeStatus(row.status),
+        'Quantidade': row.quantidade,
+        'Faturamento': row.faturamento,
+        'Valor Unitário': row.ticket,
+        'Mês': row.mes,
+        'Ano': row.ano,
+        'Data': row.data,
+        'Canal': row.canal,
+        'Natureza': row.natureza,
+      }));
+
+    return new Response(JSON.stringify({ rows: filtered }), {
+      status: 200,
+      // Cache curto na edge — a base de vendas é grande e não muda minuto a
+      // minuto; evita martelar o Metabase a cada carregamento de página.
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, max-age=600' },
+    });
+  } catch (e) {
+    return json(502, { error: 'Falha ao buscar vendas: ' + (e as Error).message });
+  }
 }
