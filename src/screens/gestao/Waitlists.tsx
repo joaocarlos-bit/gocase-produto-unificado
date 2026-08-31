@@ -31,6 +31,7 @@ interface Product {
   produto: string; cost: number; leads: number; clicks: number;
   avgCTR: number; avgCPC: number; custoLead: number; leadClick: number;
   preco: number; dias: number; firstDate: Date | null; lastRowIdx: number;
+  status: string;
 }
 
 // ── Indicadores de performance ───────────────────────────────────────────
@@ -72,7 +73,7 @@ function fmtCTRdisplay(raw: string): string {
 type State =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; wl: Row[]; ctr: Row[]; updatedAt: string };
+  | { kind: 'ready'; wl: Row[]; ctr: Row[]; status: Row[]; updatedAt: string };
 
 export function Waitlists() {
   const [state, setState] = useState<State>({ kind: 'loading' });
@@ -88,15 +89,14 @@ export function Waitlists() {
   const [ctrPage, setCtrPage] = useState(0);
   const [rankWlPage, setRankWlPage] = useState(0);
   const [rankCtrPage, setRankCtrPage] = useState(0);
-  // Carrossel de imagens: null = fechado; loading | urls vazias = estados
+  // Carrossel de imagens (Testes de CTR): null = fechado; loading | urls vazias = estados
   const [carousel, setCarousel] = useState<{ label: string; urls: string[]; idx: number; loading: boolean } | null>(null);
-  // Modal de análise de cores (waitlist results)
-  const [colorModal, setColorModal] = useState<{
-    label: string;
-    data: { cor: string; quantidade: number }[];
-    total: number;
-    loading: boolean;
-    error?: string;
+  // Modal de detalhe de um teste de Waitlist: imagens + análise de cores + dados do teste, juntos.
+  const [testModal, setTestModal] = useState<{
+    produto: string;
+    metrics: Product;
+    images: { urls: string[]; idx: number; loading: boolean };
+    colors: { data: { cor: string; quantidade: number }[]; total: number; loading: boolean; error?: string };
   } | null>(null);
   const colorCacheRef = useRef<Record<string, string>[] | null>(null);
   const shopifyLeadCacheRef = useRef<Record<string, string>[] | null>(null);
@@ -107,12 +107,13 @@ export function Waitlists() {
     (async () => {
       try {
         const sheetId = GESTAO_CONFIG.sheets.waitlist;
-        const [wl, ctr] = await Promise.all([
+        const [wl, ctr, status] = await Promise.all([
           loadSheetViaJSONP({ sheetId, sheetName: 'BD', colNames: ['Produto', 'Dia', 'CTR', 'Custo', 'CPC', 'Lead', 'Número de cliques', 'Preço', 'Custo/Lead', 'Lead/Click', 'OBS'] }),
           loadSheetViaJSONP({ sheetId, sheetName: 'Testes CTR', tq: 'order by H desc', colNames: ['Teste', 'Investimento', 'Alcance', 'CTR(%)', 'CPC', 'Cliques no Link', 'CPM', 'Data de Criação', 'Status', 'Imagem'] }),
+          loadSheetDynamic({ sheetId, sheetName: 'Status' }),
         ]);
         if (cancelled) return;
-        setState({ kind: 'ready', wl, ctr, updatedAt: new Date().toLocaleString('pt-BR') });
+        setState({ kind: 'ready', wl, ctr, status, updatedAt: new Date().toLocaleString('pt-BR') });
       } catch (e: any) {
         if (cancelled) return;
         setState({ kind: 'error', message: String(e?.message || e) });
@@ -127,19 +128,6 @@ export function Waitlists() {
     loadCtrImages().catch(() => {}); // no-op se ENDPOINT_CTR não estiver configurado
   }, []);
 
-  // Abre carrossel de um produto Waitlist. Casa contra o manifesto Waitlist e,
-  // como reforço, o de CTR — com a mesma cascata fuzzy usada nos testes de CTR
-  // (antes era só match exato, o que derrubava a taxa de acerto pela metade).
-  const openProduct = async (produto: string) => {
-    setCarousel({ label: produto, urls: [], idx: 0, loading: true });
-    try {
-      const [wlMap, ctrMap] = await Promise.all([loadDriveImages(), loadCtrImages()]);
-      const urls = resolveDriveIds(produto, [wlMap, ctrMap]).map((id) => driveImageUrl(id, 1200));
-      setCarousel({ label: produto, urls, idx: 0, loading: false });
-    } catch {
-      setCarousel({ label: produto, urls: [], idx: 0, loading: false });
-    }
-  };
   // Abre imagens de um teste CTR. Tenta, em ordem de prioridade:
   // 1) manifesto local (dist/imagens/testes/{nome}/)
   // 2) manifesto CTR do Drive via JSONP (ENDPOINT_CTR) — buscado em paralelo com o 3
@@ -186,9 +174,31 @@ export function Waitlists() {
     setCarousel({ label: nome, urls: fallbackUrls, idx: 0, loading: false });
   };
 
-  // Abre modal de análise de cores (planilha de resultados de waitlist)
-  const openColorAnalysis = async (produto: string) => {
-    setColorModal({ label: produto, data: [], total: 0, loading: true });
+  // Abre modal de detalhe de um teste de Waitlist: dispara em paralelo o
+  // carregamento de imagens (Drive) e a análise de cores (planilha de
+  // resultados), cada um atualizando sua própria fatia do estado assim que
+  // resolve — não espera o mais lento para mostrar o que já chegou.
+  const openTestDetails = (produto: string, metrics: Product) => {
+    setTestModal({
+      produto, metrics,
+      images: { urls: [], idx: 0, loading: true },
+      colors: { data: [], total: 0, loading: true },
+    });
+    loadTestImages(produto);
+    loadTestColors(produto);
+  };
+
+  const loadTestImages = async (produto: string) => {
+    try {
+      const [wlMap, ctrMap] = await Promise.all([loadDriveImages(), loadCtrImages()]);
+      const urls = resolveDriveIds(produto, [wlMap, ctrMap]).map((id) => driveImageUrl(id, 1200));
+      setTestModal((m) => (m && m.produto === produto ? { ...m, images: { urls, idx: 0, loading: false } } : m));
+    } catch {
+      setTestModal((m) => (m && m.produto === produto ? { ...m, images: { urls: [], idx: 0, loading: false } } : m));
+    }
+  };
+
+  const loadTestColors = async (produto: string) => {
     try {
       if (!colorCacheRef.current) {
         const { sheetId, gid } = GESTAO_CONFIG.sheets.waitlistResults;
@@ -262,13 +272,28 @@ export function Waitlists() {
         .sort((a, b) => b.quantidade - a.quantidade);
 
       const total = data.reduce((s, d) => s + d.quantidade, 0);
-      setColorModal({ label: produto, data, total, loading: false });
+      setTestModal((m) => (m && m.produto === produto ? { ...m, colors: { data, total, loading: false } } : m));
     } catch (e: any) {
-      setColorModal({ label: produto, data: [], total: 0, loading: false, error: String(e?.message || e) });
+      setTestModal((m) => (m && m.produto === produto ? { ...m, colors: { data: [], total: 0, loading: false, error: String(e?.message || e) } } : m));
     }
   };
 
   const ready = state.kind === 'ready' ? state : null;
+
+  // Status (Ativa/Pausada) por produto — aba "Status" da planilha de waitlist.
+  const statusByProduct = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (!ready || ready.status.length === 0) return map;
+    const cols = Object.keys(ready.status[0]);
+    const nomeCol = cols.find((c) => c.toLowerCase() === 'produto') || cols[0];
+    const statusCol = cols.find((c) => c.toLowerCase() === 'status') || 'Status';
+    ready.status.forEach((r) => {
+      const nome = r[nomeCol];
+      if (!nome) return;
+      map[normalizeProductName(nome)] = (r[statusCol] || '').trim();
+    });
+    return map;
+  }, [ready]);
 
   // Agrega produtos por janela de período (mesma lógica do filterAndRenderWaitlist)
   const products = useMemo<Product[]>(() => {
@@ -323,8 +348,9 @@ export function Waitlists() {
       custoLead: p.leads > 0 ? p.cost / p.leads : 0,
       leadClick: p.clicks > 0 ? p.leads / p.clicks : 0,
       preco: p.preco, dias: p.dias.size, firstDate: p.firstDate, lastRowIdx: p.lastRowIdx,
+      status: statusByProduct[normalizeProductName(p.produto)] || '',
     })).sort((a, b) => b.lastRowIdx - a.lastRowIdx);
-  }, [ready, period, fromDate, toDate]);
+  }, [ready, period, fromDate, toDate, statusByProduct]);
 
   // Intervalo de datas do período selecionado (null = todos) — usado pelas
   // tabelas/rankings de CTR (filtram por Data de Criação).
@@ -543,15 +569,15 @@ export function Waitlists() {
           <table className="g-table">
             <thead><tr>
               <th>Produto</th><th>Preço</th><th>Investimento</th><th>Dias</th><th>Leads</th>
-              <th>CTR</th><th>CPC</th><th>Custo/Lead</th><th>Lead/Click</th><th>1ª Data</th>
+              <th>CTR</th><th>CPC</th><th>Custo/Lead</th><th>Lead/Click</th><th>1ª Data</th><th>Status</th>
             </tr></thead>
             <tbody>
-              {wlFiltered.length === 0 && <tr><td colSpan={10} className="g-empty">Nenhum produto no período/busca.</td></tr>}
+              {wlFiltered.length === 0 && <tr><td colSpan={11} className="g-empty">Nenhum produto no período/busca.</td></tr>}
               {paginate(wlFiltered, wlPage).map((p) => (
                 <tr key={p.produto}>
                   <td className="g-name">
-                    <button className="g-link g-name__text" onClick={() => openColorAnalysis(p.produto)}>{p.produto}</button>
-                    <button className="g-img-btn" title="Ver imagens" onClick={() => openProduct(p.produto)}>
+                    <button className="g-link g-name__text" onClick={() => openTestDetails(p.produto, p)}>{p.produto}</button>
+                    <button className="g-img-btn" title="Ver detalhes" onClick={() => openTestDetails(p.produto, p)}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
                       </svg>
@@ -566,6 +592,11 @@ export function Waitlists() {
                   <td className="c b">{brl2(p.custoLead)}<Dot lvl={custoLeadLevel(p.custoLead)} /></td>
                   <td className="c m">{pct(p.leadClick)}<Dot lvl={leadClickLevel(p.leadClick)} /></td>
                   <td className="c m">{p.firstDate ? p.firstDate.toLocaleDateString('pt-BR') : '—'}</td>
+                  <td className="c">
+                    {/^ativ/i.test(p.status) ? <span className="g-badge g-badge--on">🟢 Ativa</span>
+                      : /paus/i.test(p.status) ? <span className="g-badge">⏸ Pausada</span>
+                      : <span className="m">{p.status || '—'}</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -624,69 +655,110 @@ export function Waitlists() {
         <Pager page={ctrPage} total={ctrFiltered.length} onChange={setCtrPage} />
       </Card>
 
-      {colorModal && (
-        <div className="g-modal" onClick={() => setColorModal(null)}>
-          <div className="clr-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="clr-modal__head">
-              <div>
-                <strong>{colorModal.label}</strong>
-                {colorModal.total > 0 && (
-                  <span className="clr-modal__total">{fmtNum(colorModal.total)} registros</span>
+      {testModal && (
+        <div className="g-modal" onClick={() => setTestModal(null)}>
+          <div className="test-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="test-modal__head">
+              <strong>{testModal.produto}</strong>
+              <button className="g-modal__x" onClick={() => setTestModal(null)}>✕</button>
+            </div>
+
+            <div className="test-modal__top">
+              <div className="test-modal__images">
+                <div className="dimg__body">
+                  {testModal.images.loading ? (
+                    <div className="dimg__status"><span className="spinner" /> Carregando imagens…</div>
+                  ) : testModal.images.urls.length === 0 ? (
+                    <div className="dimg__status">Nenhuma imagem encontrada no Drive para este produto.</div>
+                  ) : (
+                    <>
+                      {testModal.images.urls.length > 1 && (
+                        <button className="dimg__nav dimg__nav--prev"
+                          onClick={() => setTestModal((m) => m && ({ ...m, images: { ...m.images, idx: (m.images.idx - 1 + m.images.urls.length) % m.images.urls.length } }))}>‹</button>
+                      )}
+                      <img className="dimg__img" src={testModal.images.urls[testModal.images.idx]} alt={testModal.produto}
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          const el = e.target as HTMLImageElement;
+                          const alt = el.getAttribute('data-alt');
+                          if (alt && el.src !== alt) { el.src = alt; return; }
+                          el.style.opacity = '0.2';
+                        }}
+                        data-alt={testModal.images.urls[testModal.images.idx]?.includes('drive.google.com/thumbnail')
+                          ? 'https://lh3.googleusercontent.com/d/' + (testModal.images.urls[testModal.images.idx].match(/id=([^&]+)/)?.[1] || '') + '=w1200'
+                          : ''} />
+                      {testModal.images.urls.length > 1 && (
+                        <button className="dimg__nav dimg__nav--next"
+                          onClick={() => setTestModal((m) => m && ({ ...m, images: { ...m.images, idx: (m.images.idx + 1) % m.images.urls.length } }))}>›</button>
+                      )}
+                    </>
+                  )}
+                </div>
+                {testModal.images.urls.length > 1 && (
+                  <>
+                    <div className="dimg__counter">{testModal.images.idx + 1} / {testModal.images.urls.length}</div>
+                    <div className="test-modal__thumbs">
+                      {testModal.images.urls.map((u, i) => (
+                        <button key={i} className={`test-modal__thumb ${i === testModal.images.idx ? 'test-modal__thumb--on' : ''}`}
+                          onClick={() => setTestModal((m) => m && ({ ...m, images: { ...m.images, idx: i } }))}>
+                          <img src={u} alt="" referrerPolicy="no-referrer" />
+                        </button>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
-              <button className="g-modal__x" onClick={() => setColorModal(null)}>✕</button>
-            </div>
-            <div className="clr-modal__body">
-              {colorModal.loading ? (
-                <div className="dimg__status"><span className="spinner" /> Carregando análise de cores…</div>
-              ) : colorModal.error ? (
-                <div className="dimg__status">⚠ {colorModal.error}</div>
-              ) : colorModal.data.length === 0 ? (
-                <div className="dimg__status">Nenhum dado de cor encontrado para este produto.</div>
-              ) : (
-                <div style={{ width: '100%' }}>
-                  <p className="clr-modal__subtitle">Distribuição por cor — Waitlist</p>
-                  <ResponsiveContainer width="100%" height={Math.max(280, colorModal.data.length * 40)}>
+
+              <div className="test-modal__colors">
+                <p className="clr-modal__subtitle">
+                  Distribuição por cor — Waitlist
+                  {testModal.colors.total > 0 && <span className="clr-modal__total">{fmtNum(testModal.colors.total)} registros</span>}
+                </p>
+                {testModal.colors.loading ? (
+                  <div className="dimg__status"><span className="spinner" /> Carregando análise de cores…</div>
+                ) : testModal.colors.error ? (
+                  <div className="dimg__status">⚠ {testModal.colors.error}</div>
+                ) : testModal.colors.data.length === 0 ? (
+                  <div className="dimg__status">Nenhum dado de cor encontrado para este produto.</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={Math.max(220, testModal.colors.data.length * 40)}>
                     <BarChart
                       layout="vertical"
-                      data={colorModal.data}
+                      data={testModal.colors.data}
                       margin={{ top: 4, right: 52, left: 8, bottom: 4 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border)" />
-                      <XAxis
-                        type="number"
-                        tick={{ fontSize: 11, fill: 'var(--text-3)' }}
-                        axisLine={false}
-                        tickLine={false}
-                      />
-                      <YAxis
-                        type="category"
-                        dataKey="cor"
-                        width={90}
-                        tick={{ fontSize: 12, fill: 'var(--text)' }}
-                        axisLine={false}
-                        tickLine={false}
-                      />
+                      <XAxis type="number" tick={{ fontSize: 11, fill: 'var(--text-3)' }} axisLine={false} tickLine={false} />
+                      <YAxis type="category" dataKey="cor" width={90} tick={{ fontSize: 12, fill: 'var(--text)' }} axisLine={false} tickLine={false} />
                       <Tooltip
                         formatter={(v: number) => [fmtNum(v), 'Qtde']}
-                        contentStyle={{
-                          background: 'var(--surface)',
-                          border: '1px solid var(--border)',
-                          borderRadius: 8,
-                          fontSize: 12,
-                        }}
+                        contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
                       />
                       <Bar dataKey="quantidade" fill="var(--brand-blue)" radius={[0, 4, 4, 0]} maxBarSize={30}>
-                        <LabelList
-                          dataKey="quantidade"
-                          position="right"
-                          style={{ fontSize: 11, fill: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}
-                        />
+                        <LabelList dataKey="quantidade" position="right" style={{ fontSize: 11, fill: 'var(--text)', fontVariantNumeric: 'tabular-nums' }} />
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+
+            <div className="test-modal__data">
+              <p className="clr-modal__subtitle">Dados do teste</p>
+              <div className="test-modal__stats">
+                <div className="test-stat"><span className="test-stat__lbl">Preço</span><span className="test-stat__val">{testModal.metrics.preco ? fmtBRL2(testModal.metrics.preco) : '—'}</span></div>
+                <div className="test-stat"><span className="test-stat__lbl">Investimento</span><span className="test-stat__val">{brl(testModal.metrics.cost)}</span></div>
+                <div className="test-stat"><span className="test-stat__lbl">Dias</span><span className="test-stat__val">{testModal.metrics.dias}</span></div>
+                <div className="test-stat"><span className="test-stat__lbl">Leads</span><span className="test-stat__val">{testModal.metrics.leads ? fmtNum(testModal.metrics.leads) : '—'}</span></div>
+                <div className="test-stat">
+                  <span className="test-stat__lbl">CTR</span>
+                  <span className="test-stat__val"><span className={`ctr-cell ${ctrLevel(testModal.metrics.avgCTR) ? 'ctr-cell--' + ctrLevel(testModal.metrics.avgCTR) : ''}`}>{pct(testModal.metrics.avgCTR)}</span><Dot lvl={ctrLevel(testModal.metrics.avgCTR)} /></span>
                 </div>
-              )}
+                <div className="test-stat"><span className="test-stat__lbl">CPC</span><span className="test-stat__val">{brl2(testModal.metrics.avgCPC)}<Dot lvl={cpcLevel(testModal.metrics.avgCPC)} /></span></div>
+                <div className="test-stat"><span className="test-stat__lbl">Custo/Lead</span><span className="test-stat__val">{brl2(testModal.metrics.custoLead)}<Dot lvl={custoLeadLevel(testModal.metrics.custoLead)} /></span></div>
+                <div className="test-stat"><span className="test-stat__lbl">Lead/Click</span><span className="test-stat__val">{pct(testModal.metrics.leadClick)}<Dot lvl={leadClickLevel(testModal.metrics.leadClick)} /></span></div>
+                <div className="test-stat"><span className="test-stat__lbl">1ª Data</span><span className="test-stat__val">{testModal.metrics.firstDate ? testModal.metrics.firstDate.toLocaleDateString('pt-BR') : '—'}</span></div>
+              </div>
             </div>
           </div>
         </div>
@@ -745,12 +817,25 @@ export function Waitlists() {
         .dimg__nav { position: absolute; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border-radius: 50%; background: rgba(15,23,42,0.55); color: #fff; font-size: 22px; display: flex; align-items: center; justify-content: center; }
         .dimg__nav--prev { left: 12px; } .dimg__nav--next { right: 12px; }
         .dimg__counter { text-align: center; padding: 10px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-        .clr-modal { background: var(--surface); border-radius: var(--r-md); width: 100%; max-width: 680px; box-shadow: var(--shadow-md); overflow: hidden; max-height: 88vh; display: flex; flex-direction: column; }
-        .clr-modal__head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); font-size: 14px; gap: 12px; flex-shrink: 0; }
         .clr-modal__total { margin-left: 10px; font-size: 11px; font-weight: 600; color: var(--text-3); background: var(--surface-2); padding: 2px 8px; border-radius: 999px; }
-        .clr-modal__subtitle { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); font-weight: 700; margin: 0 0 12px; }
-        .clr-modal__body { padding: 16px 20px; overflow-y: auto; min-height: 180px; display: flex; align-items: flex-start; justify-content: center; flex: 1; }
-        .clr-modal__body > div { width: 100%; }
+        .clr-modal__subtitle { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); font-weight: 700; margin: 0 0 12px; display: flex; align-items: center; }
+        .test-modal { background: var(--surface); border-radius: var(--r-md); width: 100%; max-width: 920px; box-shadow: var(--shadow-md); overflow: hidden; max-height: 90vh; display: flex; flex-direction: column; }
+        .test-modal__head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); font-size: 14px; gap: 12px; flex-shrink: 0; }
+        .test-modal__top { display: grid; grid-template-columns: 1.1fr 1fr; gap: 20px; padding: 18px 20px; overflow-y: auto; }
+        .test-modal__images { display: flex; flex-direction: column; }
+        .test-modal__images .dimg__body { border-radius: 10px; min-height: 260px; }
+        .test-modal__thumbs { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
+        .test-modal__thumb { width: 42px; height: 42px; border-radius: 6px; overflow: hidden; border: 2px solid transparent; padding: 0; opacity: 0.6; }
+        .test-modal__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .test-modal__thumb--on { border-color: var(--brand-blue); opacity: 1; }
+        .test-modal__colors { display: flex; flex-direction: column; }
+        .test-modal__data { border-top: 1px solid var(--border); padding: 16px 20px; flex-shrink: 0; }
+        .test-modal__stats { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 10px; }
+        @media (max-width: 720px) { .test-modal__stats { grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); } }
+        .test-stat { display: flex; flex-direction: column; gap: 4px; }
+        .test-stat__lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); font-weight: 700; }
+        .test-stat__val { font-size: 14px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+        @media (max-width: 720px) { .test-modal__top { grid-template-columns: 1fr; } }
         .g-img-btn { font-size: 13px; margin-left: 6px; opacity: 0.45; vertical-align: middle; line-height: 1; }
         .g-img-btn:hover { opacity: 1; }
         .g-chartbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -761,14 +846,15 @@ export function Waitlists() {
         .g-input { font-size: 12px; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
         .g-tablewrap { overflow-x: auto; }
         .g-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-        .g-table th { text-align: left; padding: 10px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); border-bottom: 1px solid var(--border); white-space: nowrap; position: sticky; top: 0; background: var(--surface); }
+        .g-table th { text-align: center; padding: 10px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); border-bottom: 1px solid var(--border); white-space: nowrap; position: sticky; top: 0; background: var(--surface); }
         .g-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; color: var(--text); }
         .g-table tr:hover td { background: var(--surface-2); }
         .g-table td.c { text-align: center; font-variant-numeric: tabular-nums; }
         .g-table td.b { font-weight: 700; }
         .g-table td.m { color: var(--text-2); }
         .g-table td.g { color: var(--green); font-weight: 700; }
-        .g-name { font-weight: 600; width: 1px; white-space: nowrap; }
+        .g-table th:first-child { text-align: left; }
+        .g-name { font-weight: 600; width: 1px; white-space: nowrap; text-align: left; }
         .g-name__text { display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; vertical-align: middle; }
         .g-empty { text-align: center; padding: 28px; color: var(--text-3); font-size: 13px; }
         .perf-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 6px; vertical-align: middle; }
