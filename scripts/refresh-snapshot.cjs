@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const XLSX = require('xlsx');
 const { getGraphToken } = require('./graph-auth.cjs');
+const { fetchSheetSales } = require('./gsheet-sales.cjs');
 const { fetchGocaseSales } = require('./metabase-sales.cjs');
 
 // ── Carrega .env.local manualmente (sem dependência) ─────────────────────
@@ -36,14 +37,23 @@ const SHAREPOINT_FILE_URL = process.env.SHAREPOINT_FILE_URL;
 // .xlsx no disco, o script lê dele e ignora o Graph. Usado enquanto o
 // consentimento de admin não sai. Pra voltar pro Graph: comente/remova essa env.
 const SHAREPOINT_FILE_LOCAL = process.env.SHAREPOINT_FILE_LOCAL;
-// Vendas realizadas vêm da card pública do Metabase (fresca, até D-1).
-// METABASE_SALES=0 volta a usar a aba Sales do Analytics BI.xlsx.
-const USE_METABASE = process.env.METABASE_SALES !== '0';
-
-if (!SHAREPOINT_FILE_LOCAL && (!GRAPH_CLIENT_ID || !GRAPH_TENANT_ID || !SHAREPOINT_FILE_URL)) {
-  console.error('✗ Defina SHAREPOINT_FILE_LOCAL (modo arquivo local) OU GRAPH_CLIENT_ID/GRAPH_TENANT_ID/SHAREPOINT_FILE_URL (modo Graph) em .env.local');
-  process.exit(1);
-}
+// Se as credenciais do SharePoint não estiverem configuradas, cai pra
+// planilha Google "Analytics" legada (mesmas 3 abas — Sales, TicketSense,
+// SlowMoving — mantidas em paralelo desde a migração pro SharePoint em
+// 2026-06). Trocado em 2026-08-31: metabase.gocase.com.br E o Graph ficaram
+// bloqueados no egress do ambiente da rotina agendada; a planilha só precisa
+// de sheets.googleapis.com, que não costuma estar em nenhum allowlist restrito.
+const HAVE_SHAREPOINT = Boolean(
+  SHAREPOINT_FILE_LOCAL || (GRAPH_CLIENT_ID && GRAPH_TENANT_ID && SHAREPOINT_FILE_URL),
+);
+const SALES_SHEET_ID = process.env.SALES_SHEET_ID || '1mHnQXMOLom4QPQ9dZOUi48XCbK9rU-LSEJWKVTpevPQ';
+// Vendas realizadas também podem vir do Metabase — em teoria mais fresco que
+// qualquer snapshot manual, mas DESLIGADO por padrão desde 2026-08-31: testado
+// nesse dia com egress liberado, a card pública devolveu dado travado em
+// ago/2025 (~1 ano atrás), pior que a planilha Google (cobre até ago/2026).
+// METABASE_SALES=1 religa manualmente depois de confirmar que a card foi
+// corrigida (comparar meta.period.to do refresh com e sem a env).
+const USE_METABASE = process.env.METABASE_SALES === '1';
 
 const OUT_PROCESSED  = path.resolve(__dirname, '../public/data/processed-data.json');
 const OUT_SKU_SALES  = path.resolve(__dirname, '../public/data/sales-by-sku.json');
@@ -219,47 +229,65 @@ function classifyCanal(canalRaw, naturezaRaw) {
 const GRUPOS = ['D2C', 'B2B', 'Marketplace', 'Lojas', 'Brindes'];
 
 async function main() {
-  let buf;
-  if (SHAREPOINT_FILE_LOCAL) {
-    console.log(`▶ Modo arquivo local: lendo ${SHAREPOINT_FILE_LOCAL}`);
-    if (!fs.existsSync(SHAREPOINT_FILE_LOCAL)) {
-      throw new Error(`arquivo local não encontrado: ${SHAREPOINT_FILE_LOCAL}`);
+  let salesForecastRows, costsRaw, giroRaw;
+
+  if (HAVE_SHAREPOINT) {
+    let buf;
+    if (SHAREPOINT_FILE_LOCAL) {
+      console.log(`▶ Modo arquivo local: lendo ${SHAREPOINT_FILE_LOCAL}`);
+      if (!fs.existsSync(SHAREPOINT_FILE_LOCAL)) {
+        throw new Error(`arquivo local não encontrado: ${SHAREPOINT_FILE_LOCAL}`);
+      }
+      buf = fs.readFileSync(SHAREPOINT_FILE_LOCAL);
+      console.log(`  lido: ${(buf.length / 1024 / 1024).toFixed(2)} MB`);
+    } else {
+      console.log('▶ Autenticando no Microsoft Graph…');
+      const token = await getGraphToken({ clientId: GRAPH_CLIENT_ID, tenantId: GRAPH_TENANT_ID });
+      console.log('▶ Baixando Analytics BI.xlsx do SharePoint…');
+      buf = await downloadWorkbook(token, SHAREPOINT_FILE_URL);
+      console.log(`  baixado: ${(buf.length / 1024 / 1024).toFixed(2)} MB`);
     }
-    buf = fs.readFileSync(SHAREPOINT_FILE_LOCAL);
-    console.log(`  lido: ${(buf.length / 1024 / 1024).toFixed(2)} MB`);
+    const wb = XLSX.read(buf, { type: 'buffer' });
+    console.log(`  abas no workbook: ${wb.SheetNames.join(' · ')}`);
+
+    console.log('▶ Lendo Sales…');
+    // Histórico completo agora vem na própria aba Sales (Jan/25 →). O backfill
+    // via Google gviz foi removido na migração pro SharePoint.
+    const salesSheet = sheetToObjects(wb, ['Sales', 'Sales_refined', 'Vendas']);
+    // A aba Sales continua sendo a fonte do FORECAST (coluna `Projeção`), mesmo
+    // quando as vendas realizadas vêm do Metabase.
+    salesForecastRows = salesSheet.rows;
+    console.log(`  aba "${salesSheet.name}": ${salesForecastRows.length} linhas`);
+
+    console.log('▶ Lendo TicketSense…');
+    costsRaw = sheetToObjects(wb, ['TicketSense', 'Ticket Sense', 'Ticket']).rows;
+    console.log(`  total costs: ${costsRaw.length}`);
+
+    console.log('▶ Lendo SlowMoving…');
+    const giroSheet = sheetToObjects(wb, ['SlowMoving', 'Slow Moving', 'SLOWMOVING']);
+    giroRaw = giroSheet.rows;
+    console.log(`  aba "${giroSheet.name}": ${giroRaw.length} linhas`);
   } else {
-    console.log('▶ Autenticando no Microsoft Graph…');
-    const token = await getGraphToken({ clientId: GRAPH_CLIENT_ID, tenantId: GRAPH_TENANT_ID });
-    console.log('▶ Baixando Analytics BI.xlsx do SharePoint…');
-    buf = await downloadWorkbook(token, SHAREPOINT_FILE_URL);
-    console.log(`  baixado: ${(buf.length / 1024 / 1024).toFixed(2)} MB`);
+    console.log('▶ SharePoint não configurado — lendo da planilha Google "Analytics" (Sales/TicketSense/SlowMoving)…');
+    salesForecastRows = await fetchSheetSales({
+      sheetId: SALES_SHEET_ID, sheetName: 'Sales', range: 'A1:R200000', log: (m) => console.log(m),
+    });
+    costsRaw = await fetchSheetSales({
+      sheetId: SALES_SHEET_ID, sheetName: 'TicketSense', range: 'A1:U2000', log: (m) => console.log(m),
+    });
+    giroRaw = await fetchSheetSales({
+      sheetId: SALES_SHEET_ID, sheetName: 'SlowMoving', range: 'A1:P2500', log: (m) => console.log(m),
+    });
   }
-  const wb = XLSX.read(buf, { type: 'buffer' });
-  console.log(`  abas no workbook: ${wb.SheetNames.join(' · ')}`);
 
-  console.log('▶ Lendo Sales…');
-  // Histórico completo agora vem na própria aba Sales (Jan/25 →). O backfill
-  // via Google gviz foi removido na migração pro SharePoint.
-  const salesSheet = sheetToObjects(wb, ['Sales', 'Sales_refined', 'Vendas']);
-  // A aba Sales continua sendo a fonte do FORECAST (coluna `Projeção`), mesmo
-  // quando as vendas realizadas vêm do Metabase.
-  const salesForecastRows = salesSheet.rows;
+  // A aba Sales é a base de vendas realizadas por padrão; Metabase (abaixo),
+  // quando acessível, é preferido por cobrir até D-1.
   let salesRaw = salesForecastRows;
-  console.log(`  aba "${salesSheet.name}": ${salesForecastRows.length} linhas`);
-
-  console.log('▶ Lendo TicketSense…');
-  const costsRaw = sheetToObjects(wb, ['TicketSense', 'Ticket Sense', 'Ticket']).rows;
-  console.log(`  total costs: ${costsRaw.length}`);
-
-  console.log('▶ Lendo SlowMoving…');
-  const giroSheet = sheetToObjects(wb, ['SlowMoving', 'Slow Moving', 'SLOWMOVING']);
-  const giroRaw = giroSheet.rows;
-  console.log(`  aba "${giroSheet.name}": ${giroRaw.length} linhas`);
 
   // ── Vendas realizadas: Metabase (card 27799, até D-1) ─────────────────
-  // A aba Sales do xlsx é snapshot manual e fica dias atrás; a card cobre
-  // 2025-01 → D-1. Estoque/custo/curva (SlowMoving), TicketSense e o forecast
-  // (coluna `Projeção`) continuam vindo do Analytics BI.
+  // Tentado independente da fonte de Sales/TicketSense/SlowMoving acima — se
+  // o egress bloquear (ex.: rotina agendada), cai de volta pra `salesRaw`
+  // já carregado (xlsx do SharePoint ou planilha Google, conforme o caso).
   if (USE_METABASE) {
     console.log('▶ Vendas realizadas: Metabase (card pública)…');
     // De-para chave → "Nome Único": o pipeline indexa SKU pelo NOME.
@@ -275,7 +303,7 @@ async function main() {
       if (mbRows.length < 10000) throw new Error(`retorno suspeito do Metabase: ${mbRows.length} linhas`);
       salesRaw = mbRows;
     } catch (e) {
-      console.warn(`  ⚠ Metabase falhou (${e.message}) — usando a aba Sales do xlsx como fallback.`);
+      console.warn(`  ⚠ Metabase falhou (${e.message}) — usando a fonte de Sales já carregada.`);
     }
   }
 
@@ -290,8 +318,8 @@ async function main() {
       TICKET_MAP[lin] = {
         status: _col(r, ['Status', 'status']) || '',
         totalForecast: pInt(_col(r, ['Forecast Total', 'Total Forecast', 'forecastTotal'])),
-        salesAccumulated: pInt(_col(r, ['Vendas Acumuladas', 'salesAccumulated'])),
-        ticketAtual:    _col(r, ['Ticket Atual', 'ticketAtual']),
+        salesAccumulated: pInt(_col(r, ['Vendas Acumuladas', 'Sales Accumulated', 'salesAccumulated'])),
+        ticketAtual:    _col(r, ['Ticket Atual', 'Ticket Médio Atual', 'ticketAtual']),
         ticketHistorico: _col(r, ['Ticket Histórico', 'Ticket Historico', 'ticketHistorico']),
         ticketOrcado:    _col(r, ['Ticket Orçado', 'Ticket Orcado', 'ticketOrcado']),
         custo: cu,
