@@ -83,6 +83,7 @@ export function Waitlists() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [wlSearch, setWlSearch] = useState('');
+  const [wlStatus, setWlStatus] = useState<'todos' | 'ativa' | 'pausada'>('todos');
   const [ctrSearch, setCtrSearch] = useState('');
   const [ctrStatus, setCtrStatus] = useState<'todos' | 'ACTIVE' | 'PAUSED'>('todos');
   const [wlPage, setWlPage] = useState(0);
@@ -406,7 +407,14 @@ export function Waitlists() {
   const totalCostCTR = ctrInPeriod.reduce((s, r) => s + parseSheetNum(r['Investimento']), 0);
   const grandTotal = totalCostWL + totalCostCTR;
 
-  const wlFiltered = products.filter((p) => !wlSearch || p.produto.toLowerCase().includes(wlSearch.toLowerCase()));
+  const wlStatusMatches = (s: string) => {
+    if (wlStatus === 'todos') return true;
+    if (wlStatus === 'ativa') return /^ativ/i.test(s);
+    return /paus/i.test(s);
+  };
+  const wlFiltered = products
+    .filter((p) => wlStatusMatches(p.status))
+    .filter((p) => !wlSearch || p.produto.toLowerCase().includes(wlSearch.toLowerCase()));
   const ctrFiltered = ctrInPeriod
     .filter((r) => ctrStatus === 'todos' || (r['Status'] || '').toUpperCase() === ctrStatus)
     .filter((r) => !ctrSearch || (r['Teste'] || '').toLowerCase().includes(ctrSearch.toLowerCase()));
@@ -564,7 +572,14 @@ export function Waitlists() {
       </div>
 
       <Card title="Waitlists" subtitle={`${wlFiltered.length} produtos`}
-        right={<input className="g-input" placeholder="Buscar produto…" value={wlSearch} onChange={(e) => { setWlSearch(e.target.value); setWlPage(0); }} />} noPadding>
+        right={
+          <div style={{ display: 'flex', gap: 8 }}>
+            <select className="g-input" value={wlStatus} onChange={(e) => { setWlStatus(e.target.value as any); setWlPage(0); }}>
+              <option value="todos">Todos status</option><option value="ativa">Ativas</option><option value="pausada">Pausadas</option>
+            </select>
+            <input className="g-input" placeholder="Buscar produto…" value={wlSearch} onChange={(e) => { setWlSearch(e.target.value); setWlPage(0); }} />
+          </div>
+        } noPadding>
         <div className="g-tablewrap">
           <table className="g-table">
             <thead><tr>
