@@ -757,13 +757,6 @@ export function AlocacaoRecurso() {
 
   const catTableSorted = [...catFilteredRows].sort((a, b) => b.receita - a.receita || a.name.localeCompare(b.name, 'pt-BR'));
 
-  // ── Lançamentos Delayed sem info suficiente pra calcular o atraso ───────
-  // Nem CALENDAR_DELAYS (manual) nem LAUNCH_MONTH_BASELINE_2027 (baseline
-  // automático, só 2027) conseguem dizer o mês original desses.
-  const delayedSemDataInicial = catBaseRows
-    .filter((r) => r.health === 'delayed' && !delayInfoDoLancamento(r.name, Number(r.year), r.group))
-    .sort((a, b) => a.mesAno.localeCompare(b.mesAno, 'pt-BR') || a.name.localeCompare(b.name, 'pt-BR'));
-
   // ── Impacto de atrasos (receita potencialmente perdida) ────────────────
   // Perda = soma da receita mensal (Qtd × Preço) que a planilha de Projeções
   // projeta pros meses entre "de" e "paraEfetivo" (CALENDAR_DELAYS + regra do
@@ -1337,29 +1330,6 @@ export function AlocacaoRecurso() {
               {delayImpact.length > delayImpactVisible.length && (
                 <p className="ar-note">{delayImpact.length - delayImpactVisible.length} lançamento(s) atrasado(s) fora do filtro atual (categoria/ano/responsável) não aparecem na tabela acima.</p>
               )}
-            </Card>
-          )}
-
-          {delayedSemDataInicial.length > 0 && (
-            <Card
-              title="Atrasados sem data inicial cadastrada"
-              subtitle={`${delayedSemDataInicial.length} lançamento(s) com status Delayed no Monday mas sem entrada em CALENDAR_DELAYS — adicione o mês original (de) e o novo mês (para) no código pra eles ganharem "Meses de atraso" e, se a planilha tiver a curva mensal, entrarem em "Impacto de atrasos"`}
-            >
-              <div className="g-tablewrap">
-                <table className="g-table">
-                  <thead><tr><th>Lançamento</th><th>Categoria</th><th>Mês/Grupo atual</th><th>Ano</th></tr></thead>
-                  <tbody>
-                    {delayedSemDataInicial.map((r) => (
-                      <tr key={r.key}>
-                        <td className="g-name"><span className="g-name__text">{r.name}</span></td>
-                        <td><CategoriaBadge categoria={r.categoria} /></td>
-                        <td className="m">{r.mesAno}</td>
-                        <td className="m">{r.year}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             </Card>
           )}
 
