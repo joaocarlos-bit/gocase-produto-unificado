@@ -37,11 +37,14 @@ export const MONDAY = {
       people: 'multiple_person_mkt1ez1j', // "People"
       launchStatus: 'status33', // "Launch status"
       dificuldade: 'color_mkt95wfd', // "Nível de dificuldade" (Baixo/Médio/Alto)
+      tipo: 'status5', // "Tipo" — categoria de produto (Têxtil/Mala de bordo/Térmicos/Tech/Mimo/Acessórios/Pet/…)
     },
     launches2027: {
       people: 'person', // "People"
       launchStatus: 'color_mm38he5h', // "Launch status"
       dificuldade: 'color_mm39ykd4', // "Nível" (Baixo/Médio/Alto/Crítico)
+      tipo: 'color_mm39gxjm', // "Tipo" — categoria de produto (Têxtil/Malas/Térmicos/Tech/Mimo/Acessórios/Pet/Óculos/…)
+      receita: 'numeric_mm5hhs5j', // "Receita" — só existe nesse board; 2026 não tem, usa a planilha de Projeções
     },
   },
 };
@@ -138,17 +141,28 @@ export async function fetchPortfolio(token: string): Promise<MondayItem[]> {
 // ── Alocação de Recurso (People + Launch status dos boards de Lançamentos) ──
 export interface LaunchAllocItem {
   id: string; name: string; people: string[]; launchStatus: string | null; dificuldade: string | null; group: string; launched: boolean;
+  /** Categoria de produto (coluna "Tipo" do board) — null se a coluna vier vazia. */
+  categoria: string | null;
+  /** Receita (coluna "Receita", só existe no board de Lançamentos 2027) — null se o board não tiver a coluna ou vier vazia. */
+  receita: number | null;
 }
+
+export interface LaunchColumns { people: string; launchStatus: string; dificuldade: string; tipo?: string; receita?: string }
 
 const LAUNCHED_RE = /launched|lan[çc]ad[oa]/i;
 
-/** Busca id/nome/pessoas/status/dificuldade de lançamento de todos os itens de
- *  um board de Lançamentos (2026 ou 2027), paginando por cursor. `launched` =
- *  true quando o "Launch status" indica que já foi lançado (qualquer variação
- *  de "Launched"/"Lançado"), incluindo lançamentos fora do prazo. */
-export async function fetchLaunchAllocation(
-  token: string, boardId: number, peopleColId: string, statusColId: string, difficultyColId: string,
-): Promise<LaunchAllocItem[]> {
+const parseMondayNumber = (text: string | null | undefined): number | null => {
+  if (!text) return null;
+  const n = parseFloat(text.replace(/\./g, '').replace(',', '.').replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(n) ? n : null;
+};
+
+/** Busca id/nome/pessoas/status/dificuldade/categoria(/receita) de todos os
+ *  itens de um board de Lançamentos (2026 ou 2027), paginando por cursor.
+ *  `launched` = true quando o "Launch status" indica que já foi lançado
+ *  (qualquer variação de "Launched"/"Lançado"), incluindo fora do prazo. */
+export async function fetchLaunchAllocation(token: string, boardId: number, cols: LaunchColumns): Promise<LaunchAllocItem[]> {
+  const colIds = [cols.people, cols.launchStatus, cols.dificuldade, cols.tipo, cols.receita].filter((id): id is string => !!id);
   const items: LaunchAllocItem[] = [];
   let cursor: string | null = null;
   do {
@@ -160,7 +174,7 @@ export async function fetchLaunchAllocation(
           items {
             id name
             group { id title }
-            column_values(ids: ["${peopleColId}","${statusColId}","${difficultyColId}"]) { id text }
+            column_values(ids: [${colIds.map((id) => `"${id}"`).join(',')}]) { id text }
           }
         }
       }
@@ -170,9 +184,11 @@ export async function fetchLaunchAllocation(
     if (!page) throw new Error('Resposta inesperada da API');
     (page.items || []).forEach((it: MondayItem) => {
       const cvs = it.column_values || [];
-      const peopleText = cvs.find((c) => c.id === peopleColId)?.text || '';
-      const launchStatus = cvs.find((c) => c.id === statusColId)?.text || null;
-      const dificuldade = cvs.find((c) => c.id === difficultyColId)?.text || null;
+      const peopleText = cvs.find((c) => c.id === cols.people)?.text || '';
+      const launchStatus = cvs.find((c) => c.id === cols.launchStatus)?.text || null;
+      const dificuldade = cvs.find((c) => c.id === cols.dificuldade)?.text || null;
+      const categoria = cols.tipo ? (cvs.find((c) => c.id === cols.tipo)?.text || null) : null;
+      const receita = cols.receita ? parseMondayNumber(cvs.find((c) => c.id === cols.receita)?.text) : null;
       items.push({
         id: it.id,
         name: it.name,
@@ -181,6 +197,8 @@ export async function fetchLaunchAllocation(
         dificuldade,
         group: it.group?.title || 'Sem grupo',
         launched: LAUNCHED_RE.test(launchStatus || ''),
+        categoria,
+        receita,
       });
     });
     cursor = page.cursor || null;
@@ -287,6 +305,39 @@ export function businessDaysInclusive(startStr: string, endStr: string): number 
     d.setDate(d.getDate() + 1);
   }
   return count;
+}
+
+// ── Categoria de produto (a partir do nome do item de Lançamentos) ────────
+// Os itens dos boards de Lançamentos usam a convenção "🇧🇷 [TAG] Nome do
+// produto — variante", onde TAG identifica a categoria (TÉXTIL, TÉRMICO(S),
+// MALA, TECH, MIMO, ACESSÓRIOS, PET). Usado na aba Categorias.
+const CATEGORY_TAG_RE = /^[^[]*\[([^\]]+)]/;
+const CATEGORY_LABEL: Record<string, string> = {
+  TEXTIL: 'Têxtil',
+  TERMICO: 'Térmicos',
+  TERMICOS: 'Térmicos',
+  MALA: 'Mala',
+  TECH: 'Tech',
+  MIMO: 'Mimo',
+  ACESSORIOS: 'Acessórios',
+  PET: 'Pet',
+};
+export const SEM_CATEGORIA = 'Sem categoria';
+
+const normTag = (s: string) => s.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+
+/** Categoria de produto do lançamento, lida da tag entre colchetes no nome do item. */
+export function categoriaDoLancamento(name: string): string {
+  const m = CATEGORY_TAG_RE.exec(name || '');
+  if (!m) return SEM_CATEGORIA;
+  const key = normTag(m[1]);
+  return CATEGORY_LABEL[key] || m[1].trim();
+}
+
+/** Nome do lançamento sem o prefixo de bandeira/tag de categoria — usado para
+ *  casar com a coluna "Lançamento" da planilha de Projeções. */
+export function stripCategoryTag(name: string): string {
+  return (name || '').replace(/^[^[]*\[[^\]]+]\s*/, '').trim();
 }
 
 // ── Helpers de Prazo ─────────────────────────────────────────────────────

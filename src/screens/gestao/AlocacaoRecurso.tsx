@@ -18,9 +18,11 @@ import { MultiSelect } from '../../components/MultiSelect';
 import { TokenPrompt } from '../../components/TokenPrompt';
 import {
   MONDAY, getMondayToken, fetchPortfolio, fetchLaunchAllocation, isPendingLaunch, parseGroupMonth,
+  categoriaDoLancamento, stripCategoryTag, SEM_CATEGORIA,
   type MondayItem, type LaunchAllocItem,
 } from '../../data/monday';
 import { TEAM, matchTeamKey, teamMemberByKey, hasLeftTeam, type TeamMember } from '../../data/team';
+import { fetchSheetLancamentos, buildSheetIndex, matchSheetRow, type SheetLancRow } from '../../data/sheetsLancamentos';
 
 const FOCUS_GROUPS = ['OKRs 26.2', 'Projetos de IA/Tech'];
 
@@ -28,17 +30,72 @@ type State =
   | { kind: 'no-token' }
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; projects: MondayItem[]; pending2026: LaunchAllocItem[]; pending2027: LaunchAllocItem[]; updatedAt: string };
+  | { kind: 'ready'; projects: MondayItem[]; pending2026: LaunchAllocItem[]; pending2027: LaunchAllocItem[]; sheetRows: SheetLancRow[]; updatedAt: string };
 
 interface AllocRow {
   key: string; name: string; role: string; squad: string; manager: string | null;
   okr: number; ia: number; lanc2026: number; lanc2027: number; total: number;
 }
 
-type MainTab = 'alocacao' | 'lancamentos' | 'projetos';
+type MainTab = 'alocacao' | 'lancamentos' | 'categorias' | 'projetos';
 
 const norm = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const splitNames = (text: string) => (text || '').split(',').map((s) => s.trim()).filter(Boolean);
+const fmtBRL = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(v);
+
+// Atrasos conhecidos informados manualmente (mesmo motivo do DELAY_EVENTS mais
+// abaixo: o Monday não guarda histórico de mudança de grupo/mês via API).
+// Usado só pras colunas "Data inicial" / "Meses de atraso" da tabela de
+// Categorias — lançamento fora dessa lista mostra "—" nelas.
+interface CalendarDelay { name: string; de: string; para: string; meses: number; prefix?: boolean }
+const CALENDAR_DELAYS: CalendarDelay[] = [
+  { name: 'Copo Flow (Vibe Facelift)', de: 'Junho', para: 'Outubro', meses: 4 },
+  { name: 'Copo Moove', de: 'Junho', para: 'Outubro', meses: 4 },
+  { name: 'Go Clip - Novas Cores', de: 'Setembro', para: 'Janeiro', meses: 4 },
+  { name: 'Garrafa Fun Tricolor + Alça', de: 'Outubro', para: 'Novembro', meses: 1 },
+  // prefix: true casa qualquer variante do produto (ex.: "Food Jar (Lilás/Pink)").
+  { name: 'Food Jar', de: 'Outubro', para: 'Dezembro', meses: 2, prefix: true },
+  { name: 'Copo Life - Tampa PP', de: 'Março/2027', para: 'Maio/2027', meses: 2 },
+  { name: 'Garrafa Pro - Facelift', de: 'Abril/2027', para: 'Junho/2027', meses: 2 },
+  { name: 'Garrafa Magsafe - Facelift', de: 'Abril/2027', para: 'Julho/2027', meses: 3 },
+  { name: 'Garrafa GoClip', de: 'Setembro', para: 'Janeiro', meses: 4 },
+  { name: 'Marmita Fun', de: 'Outubro', para: 'Novembro', meses: 1 },
+  { name: 'Tampa Copo Flow - Feminina', de: 'Janeiro/2027', para: 'Maio/2027', meses: 4 },
+];
+function findCalendarDelay(name: string): CalendarDelay | undefined {
+  const n = norm(name);
+  return CALENDAR_DELAYS.find((e) => (e.prefix ? n.startsWith(norm(e.name)) : n === norm(e.name)));
+}
+function dataInicialDoLancamento(name: string): string {
+  return findCalendarDelay(name)?.de || '—';
+}
+function mesesAtrasoDoLancamento(name: string): string {
+  const match = findCalendarDelay(name);
+  return match ? String(match.meses) : '—';
+}
+
+// Cores fixas pras categorias mais comuns (o texto exato varia um pouco entre
+// os boards 2026/2027 — ex. "Mala de bordo" vs "Malas" — por isso o match é
+// por substring). Categorias fora dessa lista (Kit, Embalagem, Óculos, etc.)
+// caem no hash abaixo, pra sempre terem uma cor estável sem precisar mapear tudo.
+const CATEGORY_COLOR_RULES: [RegExp, string][] = [
+  [/texti/, '#c2410c'], [/mala/, '#7c3aed'], [/termic/, '#0891b2'], [/tech/, '#2563eb'],
+  [/mimo/, '#db2777'], [/acessorio/, '#ca8a04'], [/^pet$/, '#16a34a'],
+];
+const CATEGORY_FALLBACK_PALETTE = ['#0e7490', '#b45309', '#4d7c0f', '#be123c', '#0369a1', '#a21caf', '#166534', '#9333ea'];
+function categoryColor(categoria: string): string {
+  if (categoria === SEM_CATEGORIA) return '#64748b';
+  const n = norm(categoria);
+  const rule = CATEGORY_COLOR_RULES.find(([re]) => re.test(n));
+  if (rule) return rule[1];
+  let hash = 0;
+  for (let i = 0; i < n.length; i++) hash = (hash * 31 + n.charCodeAt(i)) >>> 0;
+  return CATEGORY_FALLBACK_PALETTE[hash % CATEGORY_FALLBACK_PALETTE.length];
+}
+function CategoriaBadge({ categoria }: { categoria: string }) {
+  const color = categoryColor(categoria);
+  return <span className="ar-cat" style={{ color, background: `${color}1a`, borderColor: `${color}55` }}>{categoria}</span>;
+}
 
 function riscoBadge(risco: string | null): { cls: string; label: string } | null {
   if (!risco || risco === '—') return null;
@@ -80,7 +137,7 @@ function normDif(raw: string | null): Dif | null {
 type Health = 'delayed' | 'atrisk' | 'attention' | 'ontrack' | 'other' | 'none';
 const HEALTH_ORDER: Health[] = ['delayed', 'atrisk', 'attention', 'ontrack', 'other', 'none'];
 const HEALTH_LABEL: Record<Health, string> = {
-  delayed: 'Delayed', atrisk: 'At risk', attention: 'Attention', ontrack: 'On track', other: 'Outros / parado', none: 'Sem status',
+  delayed: 'Delayed', atrisk: 'At risk', attention: 'Attention', ontrack: 'On track', other: 'Não iniciado', none: 'Sem status',
 };
 const HEALTH_CLASS: Record<Health, string> = {
   delayed: 'ar-pill--delayed', atrisk: 'ar-pill--atrisk', attention: 'ar-pill--attention', ontrack: 'ar-pill--ontrack', other: 'ar-pill--other', none: 'ar-pill--none',
@@ -188,12 +245,17 @@ function DifBadge({ level }: { level: DifKey }) {
   return <span className={`ar-dif ${DIF_CLASS[level]}`}>{label}</span>;
 }
 
-function Bar({ label, value, max, tip, crit, onClick, color, unit, active }: {
-  label: string; value: number; max: number; tip?: string; crit?: boolean; onClick?: () => void; color?: string; unit?: string; active?: boolean;
+function Bar({ label, value, max, tip, crit, onClick, color, unit, active, valueLabel, valueWidth = 52 }: {
+  label: string; value: number; max: number; tip?: string; crit?: boolean; onClick?: () => void; color?: string; unit?: string; active?: boolean; valueLabel?: string; valueWidth?: number;
 }) {
   const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
   return (
-    <div className={`ar-bar ${onClick ? 'ar-bar--click' : ''} ${active ? 'ar-bar--active' : ''}`} title={tip} onClick={onClick}>
+    <div
+      className={`ar-bar ${onClick ? 'ar-bar--click' : ''} ${active ? 'ar-bar--active' : ''}`}
+      style={{ gridTemplateColumns: `132px 1fr ${valueWidth}px` }}
+      title={tip}
+      onClick={onClick}
+    >
       <span className="ar-bar__label">{label}</span>
       <div className="ar-bar__track">
         <div
@@ -201,7 +263,7 @@ function Bar({ label, value, max, tip, crit, onClick, color, unit, active }: {
           style={{ width: `${pct}%`, ...(color ? { background: color } : {}) }}
         />
       </div>
-      <span className="ar-bar__value">{Number.isInteger(value) ? value : value.toFixed(1).replace('.', ',') + '×'}{unit}</span>
+      <span className="ar-bar__value">{valueLabel ?? (Number.isInteger(value) ? value : value.toFixed(1).replace('.', ',') + '×')}{unit}</span>
     </div>
   );
 }
@@ -304,6 +366,11 @@ export function AlocacaoRecurso() {
   const [allocSquads, setAllocSquads] = useState<string[]>([]);
   const [personFilter, setPersonFilter] = useState<string | null>(null);
   const [lancPersonFilter, setLancPersonFilter] = useState<string | null>(null);
+  const [catFilter, setCatFilter] = useState<string[]>([]);
+  const [catYear, setCatYear] = useState<'todos' | '2026' | '2027'>('todos');
+  const [catPersonFilter, setCatPersonFilter] = useState<string[]>([]);
+  const [catStatusFilter, setCatStatusFilter] = useState<Health | null>(null);
+  const [catNameFilter, setCatNameFilter] = useState<string | null>(null);
 
   useEffect(() => {
     if (!getMondayToken()) { setState({ kind: 'no-token' }); return; }
@@ -312,12 +379,13 @@ export function AlocacaoRecurso() {
     (async () => {
       try {
         const token = getMondayToken();
-        const c26 = MONDAY.columns.launches2026;
-        const c27 = MONDAY.columns.launches2027;
-        const [projects, launches2026, launches2027] = await Promise.all([
+        const [projects, launches2026, launches2027, sheetRows] = await Promise.all([
           fetchPortfolio(token),
-          fetchLaunchAllocation(token, MONDAY.boards.lancamentos2026, c26.people, c26.launchStatus, c26.dificuldade),
-          fetchLaunchAllocation(token, MONDAY.boards.lancamentos2027, c27.people, c27.launchStatus, c27.dificuldade),
+          fetchLaunchAllocation(token, MONDAY.boards.lancamentos2026, MONDAY.columns.launches2026),
+          fetchLaunchAllocation(token, MONDAY.boards.lancamentos2027, MONDAY.columns.launches2027),
+          // Planilha de receita é best-effort — se falhar (ex.: fora do ar), a
+          // aba Categorias ainda funciona, só sem os números de receita.
+          fetchSheetLancamentos().catch(() => [] as SheetLancRow[]),
         ]);
         if (cancelled) return;
         setState({
@@ -325,6 +393,7 @@ export function AlocacaoRecurso() {
           projects,
           pending2026: launches2026.filter(isPendingLaunch),
           pending2027: launches2027.filter(isPendingLaunch),
+          sheetRows,
           updatedAt: new Date().toLocaleString('pt-BR'),
         });
       } catch (e: any) {
@@ -348,7 +417,7 @@ export function AlocacaoRecurso() {
     );
   }
 
-  const { projects, pending2026, pending2027, updatedAt } = state;
+  const { projects, pending2026, pending2027, sheetRows, updatedAt } = state;
 
   const focusProjects = projects.filter((p) => FOCUS_GROUPS.includes(p.group?.title || ''));
   const iaProjects = focusProjects.filter((p) => (p.group?.title || '') === 'Projetos de IA/Tech');
@@ -522,6 +591,125 @@ export function AlocacaoRecurso() {
   const iaProjectsFiltered = iaProjects.filter(matchesPersonFilter);
   const okrProjectsFiltered = okrProjects.filter(matchesPersonFilter);
 
+  // ── Categorias (têxtil/mala/térmicos/…) × status × receita ─────────────
+  // Categoria vem da coluna "Tipo" do próprio board de Lançamentos (com
+  // fallback pra tag no nome do item, ex. "[TÉRMICO]", quando "Tipo" tá vazio).
+  // Receita: o board 2027 tem coluna "Receita" nativa; o 2026 não tem, então
+  // usa a planilha de Projeções, casada pelo nome do lançamento.
+  const sheetIndex = buildSheetIndex(sheetRows);
+  interface CatRow { key: string; name: string; categoria: string; health: Health; statusRaw: string | null; receita: number; hasReceita: boolean; group: string; mesAno: string; dataInicial: string; mesesAtraso: string; year: '2026' | '2027'; people: string[] }
+  const peopleOf = (rawNames: string[]): string[] => {
+    const names = new Set<string>();
+    rawNames.forEach((rawName) => {
+      if (hasLeftTeam(rawName)) return;
+      const key = matchTeamKey(rawName);
+      names.add(key ? teamMemberByKey(key)?.name || rawName : rawName);
+    });
+    return [...names];
+  };
+  const buildCatRows = (items: LaunchAllocItem[], year: '2026' | '2027'): CatRow[] => items.map((it) => {
+    const categoria = it.categoria?.trim() || categoriaDoLancamento(it.name);
+    const people = peopleOf(it.people);
+    const name = stripCategoryTag(it.name);
+    const mesAno = parseGroupMonth(it.group)?.label || it.group;
+    const dataInicial = dataInicialDoLancamento(name);
+    const mesesAtraso = mesesAtrasoDoLancamento(name);
+    if (it.receita != null) {
+      return { key: `${year}:${it.id}`, name, categoria, health: healthOf(it.launchStatus), statusRaw: it.launchStatus, receita: it.receita, hasReceita: true, group: it.group, mesAno, dataInicial, mesesAtraso, year, people };
+    }
+    const sheetMatch = matchSheetRow(name, sheetIndex);
+    return {
+      key: `${year}:${it.id}`,
+      name,
+      categoria,
+      health: healthOf(it.launchStatus),
+      statusRaw: it.launchStatus,
+      receita: sheetMatch?.receitaTotal || 0,
+      hasReceita: !!sheetMatch,
+      group: it.group,
+      mesAno,
+      dataInicial,
+      mesesAtraso,
+      year,
+      people,
+    };
+  });
+  const catRows: CatRow[] = [...buildCatRows(pending2026, '2026'), ...buildCatRows(pending2027, '2027')];
+
+  const catOptions = [...new Set(catRows.map((r) => r.categoria))].sort((a, b) => {
+    if (a === SEM_CATEGORIA) return 1;
+    if (b === SEM_CATEGORIA) return -1;
+    return a.localeCompare(b, 'pt-BR');
+  });
+  const catPersonOptions = [...new Set(catRows.flatMap((r) => r.people))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  // Base = categoria/ano/responsável/lançamento, SEM o filtro de status — usada
+  // pros cards "por status" (senão o clique num status faria o próprio gráfico
+  // de status colapsar pra 1 barra só). Os demais cards usam catFilteredRows,
+  // que já inclui o status — clicar num status filtra o resto da aba inteira.
+  const catBaseRows = catRows.filter((r) => (
+    (catFilter.length === 0 || catFilter.includes(r.categoria))
+    && (catYear === 'todos' || r.year === catYear)
+    && (catPersonFilter.length === 0 || r.people.some((p) => catPersonFilter.includes(p)))
+    && (catNameFilter === null || r.name === catNameFilter)
+  ));
+  const catFilteredRows = catBaseRows.filter((r) => catStatusFilter === null || r.health === catStatusFilter);
+  const toggleCatStatusFilter = (h: Health) => setCatStatusFilter((cur) => (cur === h ? null : h));
+  const toggleCatNameFilter = (name: string) => setCatNameFilter((cur) => (cur === name ? null : name));
+
+  const catHealthCounts: Record<Health, number> = { delayed: 0, atrisk: 0, attention: 0, ontrack: 0, other: 0, none: 0 };
+  const catHealthRevenue: Record<Health, number> = { delayed: 0, atrisk: 0, attention: 0, ontrack: 0, other: 0, none: 0 };
+  catBaseRows.forEach((r) => { catHealthCounts[r.health] += 1; catHealthRevenue[r.health] += r.receita; });
+  const catBaseReceitaTotal = catBaseRows.reduce((s, r) => s + r.receita, 0);
+  const catStatusOptions = HEALTH_ORDER.filter((h) => catHealthCounts[h] > 0).map((h) => HEALTH_LABEL[h]);
+  const catStatusFilterLabel = catStatusFilter ? HEALTH_LABEL[catStatusFilter] : null;
+
+  const catReceitaTotal = catFilteredRows.reduce((s, r) => s + r.receita, 0);
+  const catSemReceita = catFilteredRows.filter((r) => !r.hasReceita).length;
+  const catMaxReceita = Math.max(1, ...Object.values(catHealthRevenue));
+
+  const catTableSorted = [...catFilteredRows].sort((a, b) => b.receita - a.receita || a.name.localeCompare(b.name, 'pt-BR'));
+
+  // ── Impacto de atrasos (receita potencialmente perdida) ────────────────
+  // Perda = soma da receita mensal (Qtd × Preço) que a planilha de Projeções
+  // projeta pros meses que ficaram pra trás com o atraso (mês original até o
+  // mês novo, exclusive) — lida à mão da aba "Projeções (v4)" (colunas
+  // mensais de receita, à direita das colunas anuais V/W que o app já lê).
+  // Só entram aqui lançamentos com essa curva mensal preenchida pros meses
+  // certos; a maioria dos atrasos conhecidos (Copo Moove, Copo Flow, Garrafa
+  // Fun Tricolor+Alça, Garrafa GoClip, Marmita Fun, Copo Life-Tampa PP, Food
+  // Jar — ver CALENDAR_DELAYS) não tem: a planilha já reflete o plano NOVO
+  // (pós-atraso), então os meses perdidos aparecem como "-"/R$0 em vez de
+  // guardar o que teria vendido — não dá pra estimar a perda deles com esse
+  // método, ficam de fora até a planilha ter uma curva "antes do atraso".
+  // Garrafa Pro/Garrafa Magsafe (Facelift) e Tampa Copo Flow Feminina/
+  // Masculino são pares de variantes que dividem UMA linha só na planilha —
+  // a receita mensal dela foi dividida 50/50 entre as duas pra não contar a
+  // mesma receita duas vezes.
+  interface DelayEvent { name: string; year: '2026' | '2027'; mesOriginal: string; mesNovo: string; mesesAtraso: number; perdaEstimada: number; splitNota?: string }
+  const DELAY_EVENTS: DelayEvent[] = [
+    {
+      name: 'Garrafa Magsafe - Facelift', year: '2027', mesOriginal: 'Abril/2027', mesNovo: 'Julho/2027', mesesAtraso: 3,
+      perdaEstimada: 1_734_100, // (Abr R$999.500 + Mai R$1.299.350 + Jun R$1.169.350 = R$3.468.200) ÷ 2
+      splitNota: 'Divide a linha "Garrafa Pro/Magsafe - Facelift" da planilha com a Garrafa Pro — receita de Abril+Maio+Junho/2027 (R$ 3.468.200) dividida 50/50 entre as duas variantes.',
+    },
+    {
+      name: 'Garrafa Pro - Facelift', year: '2027', mesOriginal: 'Abril/2027', mesNovo: 'Junho/2027', mesesAtraso: 2,
+      perdaEstimada: 1_149_425, // (Abr R$999.500 + Mai R$1.299.350 = R$2.298.850) ÷ 2
+      splitNota: 'Divide a linha "Garrafa Pro/Magsafe - Facelift" da planilha com a Garrafa Magsafe — receita de Abril+Maio/2027 (R$ 2.298.850) dividida 50/50 entre as duas variantes.',
+    },
+    {
+      name: 'Tampa Copo Flow - Feminina', year: '2027', mesOriginal: 'Janeiro/2027', mesNovo: 'Maio/2027', mesesAtraso: 4,
+      perdaEstimada: 32_435, // (Jan R$19.960 + Fev R$14.970 + Mar R$14.970 + Abr R$14.970 = R$64.870) ÷ 2
+      splitNota: 'Divide a linha "Tampa Copo Flow" da planilha com a Tampa Copo Flow - Masculino — receita de Jan a Abr/2027 (R$ 64.870) dividida 50/50 entre as duas variantes.',
+    },
+  ];
+  const delayImpact = DELAY_EVENTS.map((ev) => {
+    const row = catFilteredRows.find((r) => r.year === ev.year && norm(r.name) === norm(ev.name));
+    return { ...ev, row, receita: row?.receita ?? null };
+  });
+  const delayImpactVisible = delayImpact.filter((e) => e.row);
+  const delayTotal = delayImpactVisible.reduce((s, e) => s + e.perdaEstimada, 0);
+
   return (
     <div className="g-eng">
       <div className="g-eng__head">
@@ -542,6 +730,7 @@ export function AlocacaoRecurso() {
       <div className="ar-tabs">
         <button className={`ar-tab ${tab === 'alocacao' ? 'ar-tab--on' : ''}`} onClick={() => setTab('alocacao')}>Alocação por pessoa</button>
         <button className={`ar-tab ${tab === 'lancamentos' ? 'ar-tab--on' : ''}`} onClick={() => setTab('lancamentos')}>Lançamentos</button>
+        <button className={`ar-tab ${tab === 'categorias' ? 'ar-tab--on' : ''}`} onClick={() => setTab('categorias')}>Categorias</button>
         <button className={`ar-tab ${tab === 'projetos' ? 'ar-tab--on' : ''}`} onClick={() => setTab('projetos')}>Projetos IA/OKR</button>
       </div>
 
@@ -852,6 +1041,288 @@ export function AlocacaoRecurso() {
         </>
       )}
 
+      {tab === 'categorias' && (
+        <>
+          <div className="ar-cat-head">
+            <div>
+              <h3 className="ar-cat-head__title">Categorias</h3>
+              <p className="ar-cat-head__sub">Lançamentos pendentes (2026 + 2027) por categoria de produto — status vindo do Monday, receita projetada vindo do Monday (2027) e da planilha de Projeções (2026)</p>
+            </div>
+            <div className="ar-filterbar">
+              <div className="ar-filterbar__grp">
+                <span className="ar-filterbar__lbl">Ano</span>
+                <div className="g-wl__period" style={{ marginBottom: 0 }}>
+                  <button className={`g-chip ${catYear === 'todos' ? 'g-chip--on' : ''}`} onClick={() => setCatYear('todos')}>Todos</button>
+                  <button className={`g-chip ${catYear === '2026' ? 'g-chip--on' : ''}`} onClick={() => setCatYear('2026')}>2026 ({catRows.filter((r) => r.year === '2026').length})</button>
+                  <button className={`g-chip ${catYear === '2027' ? 'g-chip--on' : ''}`} onClick={() => setCatYear('2027')}>2027 ({catRows.filter((r) => r.year === '2027').length})</button>
+                </div>
+              </div>
+              <div className="ar-filterbar__grp">
+                <span className="ar-filterbar__lbl">Categoria</span>
+                <MultiSelect options={catOptions} value={catFilter} onChange={setCatFilter} allLabel="Todas" placeholder="Selecionar categoria" />
+              </div>
+              <div className="ar-filterbar__grp">
+                <span className="ar-filterbar__lbl">Status</span>
+                <MultiSelect
+                  options={catStatusOptions}
+                  value={catStatusFilterLabel ? [catStatusFilterLabel] : []}
+                  onChange={(next) => {
+                    const label = next[next.length - 1] as string | undefined;
+                    setCatStatusFilter(label ? HEALTH_ORDER.find((h) => HEALTH_LABEL[h] === label) ?? null : null);
+                  }}
+                  allLabel="Todos"
+                  placeholder="Selecionar status"
+                  singleSelect
+                />
+              </div>
+              <div className="ar-filterbar__grp">
+                <span className="ar-filterbar__lbl">Responsável</span>
+                <MultiSelect options={catPersonOptions} value={catPersonFilter} onChange={setCatPersonFilter} allLabel="Todos" placeholder="Selecionar responsável" />
+              </div>
+              {(catFilter.length > 0 || catPersonFilter.length > 0 || catStatusFilterLabel) && (
+                <div className="ar-cat-chips">
+                  {catFilter.map((c) => <CategoriaBadge key={c} categoria={c} />)}
+                  {catStatusFilter && <span className={`ar-pill ${HEALTH_CLASS[catStatusFilter]}`}>{catStatusFilterLabel}</span>}
+                  {catPersonFilter.map((p) => <span key={p} className="ar-cat" style={{ color: 'var(--brand-blue)', background: 'var(--brand-blue-l)', borderColor: 'var(--brand-blue)' }}>{p}</span>)}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="ar-cat-kpis" style={{ marginBottom: 14 }}>
+            <KPICard label="Quantidade de projetos" value={catFilteredRows.length} icon="📦" accent="blue" />
+            <KPICard label="Receita projetada (2026+2027)" value={fmtBRL(catReceitaTotal)} icon="💰" accent="green" />
+            <KPICard
+              label="No prazo / adiantado"
+              value={`${catFilteredRows.filter((r) => r.health === 'ontrack').length} (${catFilteredRows.length ? Math.round((catFilteredRows.filter((r) => r.health === 'ontrack').length / catFilteredRows.length) * 100) : 0}%)`}
+              icon="✅"
+              accent="purple"
+            />
+            <KPICard
+              label="Atrasado ou em risco"
+              value={(() => {
+                const n = catFilteredRows.filter((r) => r.health === 'delayed' || r.health === 'atrisk' || r.health === 'attention').length;
+                return `${n} (${catFilteredRows.length ? Math.round((n / catFilteredRows.length) * 100) : 0}%)`;
+              })()}
+              icon="⚠️"
+              accent="red"
+            />
+            <KPICard
+              label="Não iniciado"
+              value={(() => {
+                const n = catFilteredRows.filter((r) => r.health === 'other').length;
+                return `${n} (${catFilteredRows.length ? Math.round((n / catFilteredRows.length) * 100) : 0}%)`;
+              })()}
+              icon="⏳"
+              accent="yellow"
+            />
+          </div>
+
+          {delayImpactVisible.length > 0 && (
+            <Card
+              title="Impacto de atrasos"
+              subtitle="Receita dos meses perdidos (mês original até o mês novo), lida da curva mensal da planilha de Projeções · clique numa linha pra filtrar a aba inteira por ela"
+              right={<span className="ar-delay-total">{fmtBRL(delayTotal)}</span>}
+            >
+              <div className="g-tablewrap">
+                <table className="g-table">
+                  <thead>
+                    <tr>
+                      <th>Lançamento</th>
+                      <th>Categoria</th>
+                      <th>De → Para</th>
+                      <th className="c">Meses de atraso</th>
+                      <th className="c">Receita projetada</th>
+                      <th className="c">Perda estimada</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {delayImpactVisible.map((e) => (
+                      <tr
+                        key={e.name}
+                        className="ar-clickrow"
+                        onClick={() => toggleCatNameFilter(e.name)}
+                        style={catNameFilter === e.name ? { background: 'var(--brand-blue-l)' } : undefined}
+                      >
+                        <td className="g-name"><span className="g-name__text">{e.name}</span></td>
+                        <td>{e.row && <CategoriaBadge categoria={e.row.categoria} />}</td>
+                        <td className="m">{e.mesOriginal} → {e.mesNovo}</td>
+                        <td className="c b">{e.mesesAtraso}</td>
+                        <td className="c">{e.receita != null ? fmtBRL(e.receita) : <span className="g-mut">—</span>}</td>
+                        <td className="c b ar-delay-loss">
+                          {fmtBRL(e.perdaEstimada)}
+                          {e.splitNota && <span className="ar-note-inline" title={e.splitNota}>*</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {delayImpactVisible.some((e) => e.splitNota) && (
+                <p className="ar-note">* linha da planilha de Projeções compartilhada entre duas variantes do Monday — receita mensal dividida 50/50 entre elas.</p>
+              )}
+              <p className="ar-note">Só entram aqui lançamentos com receita mensal preenchida na planilha pros meses perdidos — outros atrasos conhecidos (Copo Moove, Copo Flow, Garrafa Fun Tricolor + Alça, Garrafa GoClip, Marmita Fun, Copo Life - Tampa PP, Food Jar) não têm essa curva ainda e ficam de fora da estimativa.</p>
+              {delayImpact.length > delayImpactVisible.length && (
+                <p className="ar-note">{delayImpact.length - delayImpactVisible.length} lançamento(s) atrasado(s) fora do filtro atual (categoria/ano/responsável) não aparecem na tabela acima.</p>
+              )}
+            </Card>
+          )}
+
+          {catFilteredRows.length === 0 ? (
+            <Card title="Categorias"><div className="g-empty">Nenhum lançamento pendente {catFilter.length ? 'nessa(s) categoria(s)' : ''}.</div></Card>
+          ) : (
+            <>
+              {catStatusFilter && (
+                <div className="ar-personfilter">
+                  <span>Filtrando por status <strong>{HEALTH_LABEL[catStatusFilter]}</strong></span>
+                  <button className="ar-personfilter__clear" onClick={() => setCatStatusFilter(null)}>✕ Limpar filtro</button>
+                </div>
+              )}
+              {catNameFilter && (
+                <div className="ar-personfilter">
+                  <span>Filtrando por lançamento <strong>{catNameFilter}</strong></span>
+                  <button className="ar-personfilter__clear" onClick={() => setCatNameFilter(null)}>✕ Limpar filtro</button>
+                </div>
+              )}
+
+              <div className="ar-grid2">
+                <Card title="Quantidade de projetos por status" subtitle="Lançamentos pendentes, por status do Monday — clique num status pra filtrar a aba inteira">
+                  <div className="ar-stack ar-stack--rate" style={{ width: '100%', marginBottom: 12 }}>
+                    {HEALTH_ORDER.filter((h) => catHealthCounts[h] > 0).map((h) => {
+                      const items = catBaseRows.filter((r) => r.health === h);
+                      const pct = Math.round((catHealthCounts[h] / catBaseRows.length) * 100);
+                      const lightBg = h === 'other' || h === 'none';
+                      const active = catStatusFilter === h;
+                      return (
+                        <span
+                          key={h}
+                          className={`ar-seg ar-clickseg ${active ? 'ar-seg--active' : ''}`}
+                          style={{ width: `${pct}%`, background: healthColorVar(h) }}
+                          title={`${HEALTH_LABEL[h]} — ${catHealthCounts[h]} (${pct}%)\n${items.slice(0, 12).map((it) => `· ${it.name}${(h === 'other' || h === 'none') && it.statusRaw ? ` (${it.statusRaw})` : ''}`).join('\n')}${items.length > 12 ? `\n… +${items.length - 12} mais` : ''}`}
+                          onClick={() => toggleCatStatusFilter(h)}
+                        >
+                          <em style={{ color: lightBg ? 'var(--text)' : '#fff' }}>{catHealthCounts[h]}</em>
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <div className="g-tablewrap">
+                    <table className="g-table">
+                      <thead><tr><th>Status</th><th className="c">Projetos</th><th className="c">%</th></tr></thead>
+                      <tbody>
+                        {HEALTH_ORDER.filter((h) => catHealthCounts[h] > 0).map((h) => (
+                          <tr key={h} className="ar-clickrow" onClick={() => toggleCatStatusFilter(h)} style={catStatusFilter === h ? { background: 'var(--brand-blue-l)' } : undefined}>
+                            <td><span className={`ar-pill ${HEALTH_CLASS[h]}`}>{HEALTH_LABEL[h]}</span></td>
+                            <td className="c b">{catHealthCounts[h]}</td>
+                            <td className="c">{Math.round((catHealthCounts[h] / catBaseRows.length) * 100)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+
+                <Card title="Status × receita" subtitle="Receita projetada em risco — soma de receita por status · clique num status pra filtrar a aba inteira">
+                  {catBaseReceitaTotal === 0 ? (
+                    <div className="g-empty">Nenhum lançamento filtrado tem receita casada com a planilha.</div>
+                  ) : (
+                    <>
+                      <div className="ar-barlist">
+                        {HEALTH_ORDER.filter((h) => catHealthRevenue[h] > 0).map((h) => (
+                          <Bar
+                            key={h}
+                            label={HEALTH_LABEL[h]}
+                            value={catHealthRevenue[h]}
+                            max={catMaxReceita}
+                            color={healthColorVar(h)}
+                            tip={fmtBRL(catHealthRevenue[h])}
+                            valueLabel={fmtBRL(catHealthRevenue[h])}
+                            valueWidth={110}
+                            active={catStatusFilter === h}
+                            onClick={() => toggleCatStatusFilter(h)}
+                          />
+                        ))}
+                      </div>
+                      <div className="g-tablewrap" style={{ marginTop: 12 }}>
+                        <table className="g-table">
+                          <thead><tr><th>Status</th><th className="c">Receita</th><th className="c">%</th></tr></thead>
+                          <tbody>
+                            {HEALTH_ORDER.filter((h) => catHealthRevenue[h] > 0).map((h) => (
+                              <tr key={h} className="ar-clickrow" onClick={() => toggleCatStatusFilter(h)} style={catStatusFilter === h ? { background: 'var(--brand-blue-l)' } : undefined}>
+                                <td><span className={`ar-pill ${HEALTH_CLASS[h]}`}>{HEALTH_LABEL[h]}</span></td>
+                                <td className="c b">{fmtBRL(catHealthRevenue[h])}</td>
+                                <td className="c">{Math.round((catHealthRevenue[h] / catBaseReceitaTotal) * 100)}%</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                  {catSemReceita > 0 && (
+                    <p className="ar-note">+ {catSemReceita} lançamento{catSemReceita !== 1 ? 's' : ''} sem receita casada na planilha de Projeções.</p>
+                  )}
+                </Card>
+              </div>
+
+              <Card title="Lançamentos por categoria" subtitle={`${catTableSorted.length} lançamentos pendentes — ordenados por receita · clique numa linha pra filtrar a aba inteira por ela`}>
+                <div className="g-tablewrap">
+                  <table className="g-table">
+                    <thead>
+                      <tr>
+                        <th>Categoria</th>
+                        <th>Lançamento</th>
+                        <th>Data inicial</th>
+                        <th>Mês/Grupo</th>
+                        <th>Meses de atraso</th>
+                        <th>Ano</th>
+                        <th>Status</th>
+                        <th className="c">Receita projetada</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {catTableSorted.map((r) => {
+                        const pct = catReceitaTotal > 0 ? Math.round((r.receita / catReceitaTotal) * 100) : 0;
+                        return (
+                          <tr
+                            key={r.key}
+                            className="ar-clickrow"
+                            onClick={() => toggleCatNameFilter(r.name)}
+                            style={catNameFilter === r.name ? { background: 'var(--brand-blue-l)' } : undefined}
+                          >
+                            <td><CategoriaBadge categoria={r.categoria} /></td>
+                            <td className="g-name"><span className="g-name__text">{r.name}</span></td>
+                            <td className="m">{r.dataInicial}</td>
+                            <td className="m">{r.mesAno}</td>
+                            <td className="m">{r.mesesAtraso}</td>
+                            <td className="m">{r.year}</td>
+                            <td>
+                              <span className={`ar-pill ${HEALTH_CLASS[r.health]}`} title={r.statusRaw || undefined}>{HEALTH_LABEL[r.health]}</span>
+                              {(r.health === 'other' || r.health === 'none') && r.statusRaw && <span className="ar-status-raw">{r.statusRaw}</span>}
+                            </td>
+                            <td className="c">
+                              {r.hasReceita ? (
+                                <div className="ar-rowbar">
+                                  <div className="ar-rowbar__track">
+                                    <div className="ar-rowbar__fill" style={{ width: `${Math.max(4, pct)}%`, background: healthColorVar(r.health) }} />
+                                  </div>
+                                  <span className="ar-rowbar__value">{fmtBRL(r.receita)}</span>
+                                  <span className="ar-rowbar__pct">{pct}%</span>
+                                </div>
+                              ) : <span className="g-mut">—</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </>
+          )}
+        </>
+      )}
+
       {tab === 'projetos' && (
         <>
           <Card title="🌙 Score do time — gomoon" subtitle="Ranking de uso de Claude / Claude Code">
@@ -1041,6 +1512,7 @@ export function AlocacaoRecurso() {
         .ar-clickrow { cursor: pointer; }
         .ar-clickseg { cursor: pointer; }
         .ar-clickseg:hover { filter: brightness(0.92); }
+        .ar-seg--active { outline: 2px solid var(--text); outline-offset: -2px; }
         .ar-modal--wide { max-width: 720px; width: 92vw; }
 
         .ar-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
@@ -1063,6 +1535,25 @@ export function AlocacaoRecurso() {
         .ar-prio--p3 { background: var(--brand-blue-l); color: var(--brand-blue); }
         .ar-prio--okr { background: var(--purple-l); color: var(--purple); }
         .ar-prio--outra { background: var(--surface-2); color: var(--text-3); border: 1px solid var(--border); }
+
+        .ar-cat { display: inline-flex; font-size: 10.5px; font-weight: 800; padding: 3px 9px; border-radius: 999px; white-space: nowrap; border: 1px solid; }
+        .ar-cat-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+        .ar-cat-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+        .ar-cat-head__title { font-size: 13px; font-weight: 700; color: var(--text); letter-spacing: -0.01em; }
+        .ar-cat-head__sub { font-size: 11px; color: var(--text-3); margin-top: 2px; max-width: 620px; }
+        .ar-cat-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+        @media (max-width: 1100px) { .ar-cat-kpis { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 700px) { .ar-cat-kpis { grid-template-columns: repeat(2, 1fr); } }
+        .ar-delay-total { font-size: 18px; font-weight: 900; color: var(--red); font-variant-numeric: tabular-nums; }
+        .ar-delay-loss { color: var(--red); }
+        .ar-note-inline { color: var(--text-3); margin-left: 3px; cursor: help; }
+        .ar-status-raw { display: block; font-size: 10px; color: var(--text-3); margin-top: 2px; }
+
+        .ar-rowbar { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+        .ar-rowbar__track { width: 70px; height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; flex-shrink: 0; }
+        .ar-rowbar__fill { height: 100%; border-radius: 4px; }
+        .ar-rowbar__value { font-weight: 700; white-space: nowrap; }
+        .ar-rowbar__pct { font-size: 10.5px; color: var(--text-3); min-width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
 
         .ar-stack { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--surface-2); gap: 1px; }
         .ar-stack span { display: block; height: 100%; }
