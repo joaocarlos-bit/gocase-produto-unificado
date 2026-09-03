@@ -17,12 +17,12 @@ import { KPICard } from '../../components/KPICard';
 import { MultiSelect } from '../../components/MultiSelect';
 import { TokenPrompt } from '../../components/TokenPrompt';
 import {
-  MONDAY, getMondayToken, fetchPortfolio, fetchLaunchAllocation, isPendingLaunch, parseGroupMonth,
+  MONDAY, getMondayToken, fetchPortfolio, fetchLaunchAllocation, isPendingLaunch, parseGroupMonth, MONTH_PT,
   categoriaDoLancamento, stripCategoryTag, SEM_CATEGORIA,
   type MondayItem, type LaunchAllocItem,
 } from '../../data/monday';
 import { TEAM, matchTeamKey, teamMemberByKey, hasLeftTeam, type TeamMember } from '../../data/team';
-import { fetchSheetLancamentos, buildSheetIndex, matchSheetRow, type SheetLancRow } from '../../data/sheetsLancamentos';
+import { fetchSheetLancamentos, buildSheetIndex, matchSheetRow, type SheetLancRow, type SheetIndex } from '../../data/sheetsLancamentos';
 
 const FOCUS_GROUPS = ['OKRs 26.2', 'Projetos de IA/Tech'];
 
@@ -43,24 +43,29 @@ const norm = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[�
 const splitNames = (text: string) => (text || '').split(',').map((s) => s.trim()).filter(Boolean);
 const fmtBRL = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(v);
 
-// Atrasos conhecidos informados manualmente (mesmo motivo do DELAY_EVENTS mais
-// abaixo: o Monday não guarda histórico de mudança de grupo/mês via API).
-// Usado só pras colunas "Data inicial" / "Meses de atraso" da tabela de
-// Categorias — lançamento fora dessa lista mostra "—" nelas.
-interface CalendarDelay { name: string; de: string; para: string; meses: number; prefix?: boolean }
+// Atrasos conhecidos informados manualmente ("de"/"para" — o Monday não
+// guarda histórico de mudança de grupo/mês via API, então não dá pra saber
+// pelo board quando um lançamento "deveria" ter saído nem pra onde foi
+// reagendado; group só mostra o mês vigente, que às vezes nem chega a ser
+// atualizado quando o atraso é só previsto internamente). A partir daqui,
+// "Meses de atraso" e a perda em R$ do card "Impacto de atrasos" são
+// calculados automaticamente (ver paraEfetivo/delayInfoDoLancamento e
+// DELAY_EVENTS mais abaixo) — não precisa mais digitar os dois à mão.
+// Lançamento fora dessa lista mostra "—" em "Data inicial"/"Meses de atraso".
+interface CalendarDelay { name: string; de: string; para: string; prefix?: boolean }
 const CALENDAR_DELAYS: CalendarDelay[] = [
-  { name: 'Copo Flow (Vibe Facelift)', de: 'Junho', para: 'Outubro', meses: 4 },
-  { name: 'Copo Moove', de: 'Junho', para: 'Outubro', meses: 4 },
-  { name: 'Go Clip - Novas Cores', de: 'Setembro', para: 'Janeiro', meses: 4 },
-  { name: 'Garrafa Fun Tricolor + Alça', de: 'Outubro', para: 'Novembro', meses: 1 },
-  // prefix: true casa qualquer variante do produto (ex.: "Food Jar (Lilás/Pink)").
-  { name: 'Food Jar', de: 'Outubro', para: 'Dezembro', meses: 2, prefix: true },
-  { name: 'Copo Life - Tampa PP', de: 'Março/2027', para: 'Maio/2027', meses: 2 },
-  { name: 'Garrafa Pro - Facelift', de: 'Abril/2027', para: 'Junho/2027', meses: 2 },
-  { name: 'Garrafa Magsafe - Facelift', de: 'Abril/2027', para: 'Julho/2027', meses: 3 },
-  { name: 'Garrafa GoClip', de: 'Setembro', para: 'Janeiro', meses: 4 },
-  { name: 'Marmita Fun', de: 'Outubro', para: 'Novembro', meses: 1 },
-  { name: 'Tampa Copo Flow - Feminina', de: 'Janeiro/2027', para: 'Maio/2027', meses: 4 },
+  { name: 'Copo Flow (Vibe Facelift)', de: 'Junho', para: 'Outubro' },
+  // prefix: true casa qualquer variante do produto (ex.: "Copo Moove 420ml (Café)").
+  { name: 'Copo Moove', de: 'Junho', para: 'Outubro', prefix: true },
+  { name: 'Go Clip - Novas Cores', de: 'Setembro', para: 'Janeiro' },
+  { name: 'Garrafa Fun Tricolor + Alça', de: 'Outubro', para: 'Novembro' },
+  { name: 'Food Jar', de: 'Outubro', para: 'Dezembro', prefix: true },
+  { name: 'Copo Life - Tampa PP', de: 'Março/2027', para: 'Maio/2027' },
+  { name: 'Garrafa Pro - Facelift', de: 'Abril/2027', para: 'Junho/2027' },
+  { name: 'Garrafa Magsafe - Facelift', de: 'Abril/2027', para: 'Julho/2027' },
+  { name: 'Garrafa GoClip', de: 'Setembro', para: 'Janeiro' },
+  { name: 'Marmita Fun', de: 'Outubro', para: 'Novembro' },
+  { name: 'Tampa Copo Flow - Feminina', de: 'Janeiro/2027', para: 'Maio/2027' },
 ];
 function findCalendarDelay(name: string): CalendarDelay | undefined {
   const n = norm(name);
@@ -69,9 +74,52 @@ function findCalendarDelay(name: string): CalendarDelay | undefined {
 function dataInicialDoLancamento(name: string): string {
   return findCalendarDelay(name)?.de || '—';
 }
-function mesesAtrasoDoLancamento(name: string): string {
-  const match = findCalendarDelay(name);
-  return match ? String(match.meses) : '—';
+
+// ── Aritmética de mês (ano, mês 0-based) — atraso e perda estimada ────────
+interface YM { year: number; month: number }
+const ymKey = (ym: YM) => ym.year * 12 + ym.month;
+const ymCompare = (a: YM, b: YM) => ymKey(a) - ymKey(b);
+const ymAdd = (ym: YM, delta: number): YM => {
+  const total = ymKey(ym) + delta;
+  return { year: Math.floor(total / 12), month: ((total % 12) + 12) % 12 };
+};
+const ymDiff = (a: YM, b: YM) => ymKey(b) - ymKey(a);
+const ymLabel = (ym: YM) => `${MONTH_PT[ym.month]}/${ym.year}`;
+
+/** Interpreta "Junho" ou "Março/2027" (formato do CALENDAR_DELAYS) num
+ *  {year,month} — sem ano explícito, assume o ano do próprio board (2026/2027)
+ *  do lançamento. */
+function parseDelayMonth(text: string, fallbackYear: number): YM | null {
+  const parsed = parseGroupMonth(text.replace('/', ' '));
+  if (!parsed) return null;
+  return { year: parsed.year ?? fallbackYear, month: parsed.month };
+}
+
+const HOJE = new Date();
+const HOJE_YM: YM = { year: HOJE.getFullYear(), month: HOJE.getMonth() };
+/** Regra do dia 15: se o mês gravado em "para" já virou, ou já passou do dia
+ *  15 dele, considera que esse mês também já era perdido e empurra o atraso
+ *  pro mês seguinte — sem esperar alguém atualizar o CALENDAR_DELAYS nem
+ *  depender do Monday ter mudado o group. */
+function paraEfetivo(paraYM: YM): YM {
+  const cmp = ymCompare(paraYM, HOJE_YM);
+  const jaPassou = cmp < 0 || (cmp === 0 && HOJE.getDate() > 15);
+  return jaPassou ? ymAdd(paraYM, 1) : paraYM;
+}
+
+interface DelayInfo { de: YM; para: YM; paraEfetivo: YM; mesesAtraso: number }
+function delayInfoDoLancamento(name: string, fallbackYear: number): DelayInfo | null {
+  const entry = findCalendarDelay(name);
+  if (!entry) return null;
+  const de = parseDelayMonth(entry.de, fallbackYear);
+  const para = parseDelayMonth(entry.para, fallbackYear);
+  if (!de || !para) return null;
+  const efetivo = paraEfetivo(para);
+  return { de, para, paraEfetivo: efetivo, mesesAtraso: Math.max(0, ymDiff(de, efetivo)) };
+}
+function mesesAtrasoDoLancamento(name: string, fallbackYear: number): string {
+  const info = delayInfoDoLancamento(name, fallbackYear);
+  return info ? String(info.mesesAtraso) : '—';
 }
 
 // Cores fixas pras categorias mais comuns (o texto exato varia um pouco entre
@@ -613,7 +661,7 @@ export function AlocacaoRecurso() {
     const name = stripCategoryTag(it.name);
     const mesAno = parseGroupMonth(it.group)?.label || it.group;
     const dataInicial = dataInicialDoLancamento(name);
-    const mesesAtraso = mesesAtrasoDoLancamento(name);
+    const mesesAtraso = mesesAtrasoDoLancamento(name, Number(year));
     if (it.receita != null) {
       return { key: `${year}:${it.id}`, name, categoria, health: healthOf(it.launchStatus), statusRaw: it.launchStatus, receita: it.receita, hasReceita: true, group: it.group, mesAno, dataInicial, mesesAtraso, year, people };
     }
@@ -669,46 +717,97 @@ export function AlocacaoRecurso() {
 
   const catTableSorted = [...catFilteredRows].sort((a, b) => b.receita - a.receita || a.name.localeCompare(b.name, 'pt-BR'));
 
+  // ── Lançamentos Delayed sem "de"/"para" no CALENDAR_DELAYS ──────────────
+  // Sem uma entrada lá a gente não sabe o mês original, então nem "Meses de
+  // atraso" nem "Impacto de atrasos" conseguem calcular nada pra eles.
+  const delayedSemDataInicial = catBaseRows
+    .filter((r) => r.health === 'delayed' && !findCalendarDelay(r.name))
+    .sort((a, b) => a.mesAno.localeCompare(b.mesAno, 'pt-BR') || a.name.localeCompare(b.name, 'pt-BR'));
+
   // ── Impacto de atrasos (receita potencialmente perdida) ────────────────
   // Perda = soma da receita mensal (Qtd × Preço) que a planilha de Projeções
-  // projeta pros meses que ficaram pra trás com o atraso (mês original até o
-  // mês novo, exclusive) — lida à mão da aba "Projeções (v4)" (colunas
-  // mensais de receita, à direita das colunas anuais V/W que o app já lê).
-  // Só entram aqui lançamentos com essa curva mensal preenchida pros meses
-  // certos; a maioria dos atrasos conhecidos (Copo Moove, Copo Flow, Garrafa
-  // Fun Tricolor+Alça, Garrafa GoClip, Marmita Fun, Copo Life-Tampa PP, Food
-  // Jar — ver CALENDAR_DELAYS) não tem: a planilha já reflete o plano NOVO
-  // (pós-atraso), então os meses perdidos aparecem como "-"/R$0 em vez de
-  // guardar o que teria vendido — não dá pra estimar a perda deles com esse
-  // método, ficam de fora até a planilha ter uma curva "antes do atraso".
-  // Garrafa Pro/Garrafa Magsafe (Facelift) e Tampa Copo Flow Feminina/
-  // Masculino são pares de variantes que dividem UMA linha só na planilha —
-  // a receita mensal dela foi dividida 50/50 entre as duas pra não contar a
-  // mesma receita duas vezes.
-  interface DelayEvent { name: string; year: '2026' | '2027'; mesOriginal: string; mesNovo: string; mesesAtraso: number; perdaEstimada: number; splitNota?: string }
-  const DELAY_EVENTS: DelayEvent[] = [
-    {
-      name: 'Garrafa Magsafe - Facelift', year: '2027', mesOriginal: 'Abril/2027', mesNovo: 'Julho/2027', mesesAtraso: 3,
-      perdaEstimada: 1_734_100, // (Abr R$999.500 + Mai R$1.299.350 + Jun R$1.169.350 = R$3.468.200) ÷ 2
-      splitNota: 'Divide a linha "Garrafa Pro/Magsafe - Facelift" da planilha com a Garrafa Pro — receita de Abril+Maio+Junho/2027 (R$ 3.468.200) dividida 50/50 entre as duas variantes.',
-    },
-    {
-      name: 'Garrafa Pro - Facelift', year: '2027', mesOriginal: 'Abril/2027', mesNovo: 'Junho/2027', mesesAtraso: 2,
-      perdaEstimada: 1_149_425, // (Abr R$999.500 + Mai R$1.299.350 = R$2.298.850) ÷ 2
-      splitNota: 'Divide a linha "Garrafa Pro/Magsafe - Facelift" da planilha com a Garrafa Magsafe — receita de Abril+Maio/2027 (R$ 2.298.850) dividida 50/50 entre as duas variantes.',
-    },
-    {
-      name: 'Tampa Copo Flow - Feminina', year: '2027', mesOriginal: 'Janeiro/2027', mesNovo: 'Maio/2027', mesesAtraso: 4,
-      perdaEstimada: 32_435, // (Jan R$19.960 + Fev R$14.970 + Mar R$14.970 + Abr R$14.970 = R$64.870) ÷ 2
-      splitNota: 'Divide a linha "Tampa Copo Flow" da planilha com a Tampa Copo Flow - Masculino — receita de Jan a Abr/2027 (R$ 64.870) dividida 50/50 entre as duas variantes.',
-    },
-  ];
-  const delayImpact = DELAY_EVENTS.map((ev) => {
-    const row = catFilteredRows.find((r) => r.year === ev.year && norm(r.name) === norm(ev.name));
-    return { ...ev, row, receita: row?.receita ?? null };
-  });
+  // projeta pros meses entre "de" e "paraEfetivo" (CALENDAR_DELAYS + regra do
+  // dia 15, ver acima) — lida automaticamente da curva mensal da aba
+  // "Projeções (v4)" (SheetLancRow.receitaMensal). Só entram aqui lançamentos
+  // com pelo menos 1 mês de receita preenchida nessa janela; a planilha às
+  // vezes já reflete o plano NOVO (pós-atraso) e os meses perdidos aparecem
+  // como "-"/0 em vez de guardar o que teria vendido — nesse caso não dá pra
+  // estimar a perda e o item cai em `delayImpactExcluidos` abaixo.
+  interface SheetAlias { sheetName: string; splitEntre: number }
+  // Duas variantes do Monday que dividem UMA linha só na planilha (o nome de
+  // lá junta as duas, ex. "Garrafa Pro/Magsafe - Facelift") — a receita
+  // mensal dessa linha é dividida igualmente entre elas pra não contar a
+  // mesma receita duas vezes. Único ponto que ainda precisa de mapa manual:
+  // não dá pra inferir isso só pelo nome.
+  const SHEET_NAME_ALIASES: Record<string, SheetAlias> = {
+    [norm('Garrafa Pro - Facelift')]: { sheetName: 'Garrafa Pro/Magsafe - Facelift', splitEntre: 2 },
+    [norm('Garrafa Magsafe - Facelift')]: { sheetName: 'Garrafa Pro/Magsafe - Facelift', splitEntre: 2 },
+    [norm('Tampa Copo Flow - Feminina')]: { sheetName: 'Tampa Copo Flow', splitEntre: 2 },
+    [norm('Tampa Copo Flow - Masculino')]: { sheetName: 'Tampa Copo Flow', splitEntre: 2 },
+  };
+  function findSheetRowForDelay(name: string, index: SheetIndex): { row: SheetLancRow; splitEntre: number } | null {
+    const alias = SHEET_NAME_ALIASES[norm(name)];
+    if (alias) {
+      const row = index.byExact.get(norm(alias.sheetName));
+      return row ? { row, splitEntre: alias.splitEntre } : null;
+    }
+    const exact = index.byExact.get(norm(name));
+    if (exact) return { row: exact, splitEntre: 1 };
+    // Fallback conservador: só casa se um nome for prefixo literal do outro
+    // (ex. Monday "Copo Moove 420ml (Café)" × planilha "Copo Moove"). Não usa
+    // o fallback por prefixo-até-o-hífen do matchSheetRow porque esse soma
+    // TODAS as variantes com o mesmo prefixo — o que aqui misturaria receita
+    // de lançamentos diferentes (ex. várias linhas "Copo Life - …").
+    const n = norm(name);
+    for (const row of index.byExact.values()) {
+      const nRow = norm(row.lancamento);
+      if (nRow.length > 3 && (n.startsWith(nRow) || nRow.startsWith(n))) return { row, splitEntre: 1 };
+    }
+    return null;
+  }
+
+  interface DelayImpactRow {
+    name: string; year: '2026' | '2027'; mesOriginal: string; mesNovo: string; mesesAtraso: number;
+    perdaEstimada: number; splitNota?: string; row: CatRow | undefined;
+  }
+  const delayImpactAll: DelayImpactRow[] = catRows
+    .map((r): DelayImpactRow | null => {
+      const info = delayInfoDoLancamento(r.name, Number(r.year));
+      if (!info || info.mesesAtraso <= 0) return null;
+      const match = findSheetRowForDelay(r.name, sheetIndex);
+      if (!match) return null;
+      let perda = 0;
+      let mesesComDados = 0;
+      match.row.receitaMensal.forEach((mv) => {
+        const ym: YM = { year: mv.year, month: mv.month };
+        if (ymCompare(ym, info.de) >= 0 && ymCompare(ym, info.paraEfetivo) < 0 && mv.value > 0) {
+          perda += mv.value;
+          mesesComDados += 1;
+        }
+      });
+      if (mesesComDados === 0) return null;
+      return {
+        name: r.name, year: r.year, mesOriginal: ymLabel(info.de), mesNovo: ymLabel(info.para), mesesAtraso: info.mesesAtraso,
+        perdaEstimada: perda / match.splitEntre,
+        splitNota: match.splitEntre > 1
+          ? `Divide a linha "${match.row.lancamento}" da planilha de Projeções com outra variante do Monday — receita mensal dividida igualmente entre elas.`
+          : undefined,
+        row: r,
+      };
+    })
+    .filter((e): e is DelayImpactRow => e !== null);
+  // "row" só fica visível se o lançamento também passa nos filtros atuais da
+  // aba (categoria/ano/responsável/status) — mesmo comportamento de antes.
+  const delayImpact = delayImpactAll.map((e) => ({ ...e, row: catFilteredRows.includes(e.row!) ? e.row : undefined }));
   const delayImpactVisible = delayImpact.filter((e) => e.row);
   const delayTotal = delayImpactVisible.reduce((s, e) => s + e.perdaEstimada, 0);
+  // Atrasos conhecidos (têm "de"/"para") mas sem curva mensal utilizável na
+  // janela perdida — ficam de fora da tabela, listados na nota abaixo dela.
+  const delayImpactExcluidos = catRows.filter((r) => {
+    const info = delayInfoDoLancamento(r.name, Number(r.year));
+    if (!info || info.mesesAtraso <= 0) return false;
+    return !delayImpactAll.some((e) => e.name === r.name && e.year === r.year);
+  });
 
   return (
     <div className="g-eng">
@@ -1148,7 +1247,7 @@ export function AlocacaoRecurso() {
                         <td>{e.row && <CategoriaBadge categoria={e.row.categoria} />}</td>
                         <td className="m">{e.mesOriginal} → {e.mesNovo}</td>
                         <td className="c b">{e.mesesAtraso}</td>
-                        <td className="c">{e.receita != null ? fmtBRL(e.receita) : <span className="g-mut">—</span>}</td>
+                        <td className="c">{e.row?.receita != null ? fmtBRL(e.row.receita) : <span className="g-mut">—</span>}</td>
                         <td className="c b ar-delay-loss">
                           {fmtBRL(e.perdaEstimada)}
                           {e.splitNota && <span className="ar-note-inline" title={e.splitNota}>*</span>}
@@ -1161,10 +1260,35 @@ export function AlocacaoRecurso() {
               {delayImpactVisible.some((e) => e.splitNota) && (
                 <p className="ar-note">* linha da planilha de Projeções compartilhada entre duas variantes do Monday — receita mensal dividida 50/50 entre elas.</p>
               )}
-              <p className="ar-note">Só entram aqui lançamentos com receita mensal preenchida na planilha pros meses perdidos — outros atrasos conhecidos (Copo Moove, Copo Flow, Garrafa Fun Tricolor + Alça, Garrafa GoClip, Marmita Fun, Copo Life - Tampa PP, Food Jar) não têm essa curva ainda e ficam de fora da estimativa.</p>
+              {delayImpactExcluidos.length > 0 && (
+                <p className="ar-note">Só entram aqui lançamentos com receita mensal preenchida na planilha pros meses perdidos — {delayImpactExcluidos.length} atraso{delayImpactExcluidos.length !== 1 ? 's' : ''} conhecido{delayImpactExcluidos.length !== 1 ? 's' : ''} sem essa curva ainda fica{delayImpactExcluidos.length !== 1 ? 'm' : ''} de fora da estimativa: {delayImpactExcluidos.map((r) => r.name).join(', ')}.</p>
+              )}
               {delayImpact.length > delayImpactVisible.length && (
                 <p className="ar-note">{delayImpact.length - delayImpactVisible.length} lançamento(s) atrasado(s) fora do filtro atual (categoria/ano/responsável) não aparecem na tabela acima.</p>
               )}
+            </Card>
+          )}
+
+          {delayedSemDataInicial.length > 0 && (
+            <Card
+              title="Atrasados sem data inicial cadastrada"
+              subtitle={`${delayedSemDataInicial.length} lançamento(s) com status Delayed no Monday mas sem entrada em CALENDAR_DELAYS — adicione o mês original (de) e o novo mês (para) no código pra eles ganharem "Meses de atraso" e, se a planilha tiver a curva mensal, entrarem em "Impacto de atrasos"`}
+            >
+              <div className="g-tablewrap">
+                <table className="g-table">
+                  <thead><tr><th>Lançamento</th><th>Categoria</th><th>Mês/Grupo atual</th><th>Ano</th></tr></thead>
+                  <tbody>
+                    {delayedSemDataInicial.map((r) => (
+                      <tr key={r.key}>
+                        <td className="g-name"><span className="g-name__text">{r.name}</span></td>
+                        <td><CategoriaBadge categoria={r.categoria} /></td>
+                        <td className="m">{r.mesAno}</td>
+                        <td className="m">{r.year}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </Card>
           )}
 
