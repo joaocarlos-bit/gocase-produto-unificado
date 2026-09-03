@@ -11,7 +11,7 @@ export type ScreenId =
   // Gestão (dash-produto) — prefixo g_ pra não colidir com 'lancamentos' do Performance
   | 'g_engenharia' | 'g_lancamentos' | 'g_waitlists' | 'g_prazo' | 'g_projetos' | 'g_relatorios' | 'g_alocacao'
   // Importação (Controle de Importações) — prefixo imp_
-  | 'imp_custos';
+  | 'imp_custos' | 'imp_pos';
 
 export type Front = 'geral' | 'gestao' | 'performance' | 'importacao';
 
@@ -74,6 +74,7 @@ export const SECTIONS: NavSection[] = [
     hint: 'Controle de Importações',
     items: [
       { id: 'imp_custos', label: 'Histórico de Custos', ready: true },
+      { id: 'imp_pos', label: 'Controle de Importação', ready: true },
     ],
   },
 ];

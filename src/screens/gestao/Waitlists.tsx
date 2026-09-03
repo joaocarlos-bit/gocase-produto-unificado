@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList,
+  BarChart, Bar, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList,
 } from 'recharts';
 import { Card } from '../../components/Card';
 import { KPICard } from '../../components/KPICard';
@@ -369,12 +369,19 @@ export function Waitlists() {
   }, [period, fromDate, toDate]);
 
   // Volume mensal (histórico completo, independente do filtro de período):
-  //   - CTR: nº de testes por mês de "Data de Criação"
-  //   - Waitlist: nº de produtos distintos pelo mês da 1ª "Dia" (novos testes/mês)
+  //   - CTR: nº de testes por mês de "Data de Criação", + investimento (soma de "Investimento") no mesmo mês
+  //   - Waitlist: nº de produtos distintos pelo mês da 1ª "Dia" (novos testes/mês), + investimento (soma de "Custo") por mês de "Dia"
   const monthly = useMemo(() => {
-    if (!ready) return { ctr: [] as { ym: string; label: string; count: number }[], wl: [] as { ym: string; label: string; count: number }[] };
+    type Series = { ym: string; label: string; count: number; invest: number }[];
+    if (!ready) return { ctr: [] as Series, wl: [] as Series };
     const ctrMap: Record<string, number> = {};
-    ready.ctr.forEach((r) => { const d = parseDateBR(r['Data de Criação']); if (d) ctrMap[ymOf(d)] = (ctrMap[ymOf(d)] || 0) + 1; });
+    const ctrInvMap: Record<string, number> = {};
+    ready.ctr.forEach((r) => {
+      const d = parseDateBR(r['Data de Criação']); if (!d) return;
+      const ym = ymOf(d);
+      ctrMap[ym] = (ctrMap[ym] || 0) + 1;
+      ctrInvMap[ym] = (ctrInvMap[ym] || 0) + parseSheetNum(r['Investimento']);
+    });
     const firstByProd: Record<string, Date> = {};
     ready.wl.forEach((r) => {
       const name = r['Produto']; if (!name) return;
@@ -383,10 +390,16 @@ export function Waitlists() {
     });
     const wlMap: Record<string, number> = {};
     Object.values(firstByProd).forEach((d) => { wlMap[ymOf(d)] = (wlMap[ymOf(d)] || 0) + 1; });
-    const toSeries = (m: Record<string, number>) =>
+    const wlInvMap: Record<string, number> = {};
+    ready.wl.forEach((r) => {
+      const d = parseDateBR(r['Dia']); if (!d) return;
+      const ym = ymOf(d);
+      wlInvMap[ym] = (wlInvMap[ym] || 0) + parseSheetNum(r['Custo']);
+    });
+    const toSeries = (m: Record<string, number>, inv: Record<string, number>): Series =>
       Object.entries(m).sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([ym, count]) => ({ ym, label: ymLabel(ym), count }));
-    return { ctr: toSeries(ctrMap), wl: toSeries(wlMap) };
+        .map(([ym, count]) => ({ ym, label: ymLabel(ym), count, invest: inv[ym] || 0 }));
+    return { ctr: toSeries(ctrMap, ctrInvMap), wl: toSeries(wlMap, wlInvMap) };
   }, [ready]);
 
   if (state.kind === 'loading') return <div className="g-status"><span className="spinner" /> Carregando Waitlists…</div>;
@@ -432,7 +445,7 @@ export function Waitlists() {
 
   // Filtro de ano dos gráficos de volume (padrão 2026)
   const chartYears = Array.from(new Set([...monthly.ctr, ...monthly.wl].map((d) => d.ym.slice(0, 4)))).sort((a, b) => b.localeCompare(a));
-  const filterYear = (s: { ym: string; label: string; count: number }[]) =>
+  const filterYear = (s: { ym: string; label: string; count: number; invest: number }[]) =>
     chartYear === 'all' ? s.slice(-18) : s.filter((d) => d.ym.startsWith(chartYear + '-'));
   const ctrChart = filterYear(monthly.ctr);
   const wlChart = filterYear(monthly.wl);
@@ -471,15 +484,18 @@ export function Waitlists() {
               <div className="g-empty">Sem testes de CTR em {chartYear === 'all' ? 'período' : chartYear}.</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={ctrChart} margin={{ top: 20, right: 12, bottom: 4, left: -10 }}>
+                <ComposedChart data={ctrChart} margin={{ top: 20, right: 12, bottom: 4, left: -10 }}>
                   <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" tick={{ fill: 'var(--text-3)', fontSize: 11, fontWeight: 600 }} tickLine={false} axisLine={{ stroke: 'var(--border)' }} />
-                  <YAxis tick={{ fill: 'var(--text-3)', fontSize: 10 }} width={34} tickLine={false} axisLine={false} allowDecimals={false} />
-                  <Tooltip formatter={(v: number) => [fmtNum(v), 'testes']} contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid var(--border)', fontWeight: 600 }} cursor={{ fill: 'rgba(245,158,11,0.08)' }} />
-                  <Bar dataKey="count" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={46}>
+                  <YAxis yAxisId="left" tick={{ fill: 'var(--text-3)', fontSize: 10 }} width={34} tickLine={false} axisLine={false} allowDecimals={false} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fill: 'var(--text-3)', fontSize: 10 }} width={54} tickLine={false} axisLine={false} tickFormatter={(v: number) => fmtBRL(v)} />
+                  <Tooltip formatter={(v: number, name: string) => (name === 'Investimento' ? [fmtBRL(v), name] : [fmtNum(v), name])} contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid var(--border)', fontWeight: 600 }} cursor={{ fill: 'rgba(245,158,11,0.08)' }} />
+                  <Legend wrapperStyle={{ fontSize: 11, fontWeight: 600 }} />
+                  <Bar yAxisId="left" dataKey="count" name="Testes" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={46}>
                     <LabelList dataKey="count" position="top" formatter={(v: number) => (v > 0 ? fmtNum(v) : '')} fill="var(--text)" fontSize={10} fontWeight={700} />
                   </Bar>
-                </BarChart>
+                  <Line yAxisId="right" dataKey="invest" name="Investimento" type="monotone" stroke="#2563eb" strokeWidth={2} dot={{ r: 3, fill: '#2563eb' }} />
+                </ComposedChart>
               </ResponsiveContainer>
             )}
           </div>
@@ -491,15 +507,18 @@ export function Waitlists() {
               <div className="g-empty">Sem waitlists em {chartYear === 'all' ? 'período' : chartYear}.</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={wlChart} margin={{ top: 20, right: 12, bottom: 4, left: -10 }}>
+                <ComposedChart data={wlChart} margin={{ top: 20, right: 12, bottom: 4, left: -10 }}>
                   <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" tick={{ fill: 'var(--text-3)', fontSize: 11, fontWeight: 600 }} tickLine={false} axisLine={{ stroke: 'var(--border)' }} />
-                  <YAxis tick={{ fill: 'var(--text-3)', fontSize: 10 }} width={34} tickLine={false} axisLine={false} allowDecimals={false} />
-                  <Tooltip formatter={(v: number) => [fmtNum(v), 'testes']} contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid var(--border)', fontWeight: 600 }} cursor={{ fill: 'rgba(139,92,246,0.08)' }} />
-                  <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={46}>
+                  <YAxis yAxisId="left" tick={{ fill: 'var(--text-3)', fontSize: 10 }} width={34} tickLine={false} axisLine={false} allowDecimals={false} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fill: 'var(--text-3)', fontSize: 10 }} width={54} tickLine={false} axisLine={false} tickFormatter={(v: number) => fmtBRL(v)} />
+                  <Tooltip formatter={(v: number, name: string) => (name === 'Investimento' ? [fmtBRL(v), name] : [fmtNum(v), name])} contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid var(--border)', fontWeight: 600 }} cursor={{ fill: 'rgba(139,92,246,0.08)' }} />
+                  <Legend wrapperStyle={{ fontSize: 11, fontWeight: 600 }} />
+                  <Bar yAxisId="left" dataKey="count" name="Testes" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={46}>
                     <LabelList dataKey="count" position="top" formatter={(v: number) => (v > 0 ? fmtNum(v) : '')} fill="var(--text)" fontSize={10} fontWeight={700} />
                   </Bar>
-                </BarChart>
+                  <Line yAxisId="right" dataKey="invest" name="Investimento" type="monotone" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 3, fill: '#0ea5e9' }} />
+                </ComposedChart>
               </ResponsiveContainer>
             )}
           </div>

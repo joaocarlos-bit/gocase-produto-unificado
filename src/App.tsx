@@ -21,6 +21,7 @@ import { Canais } from './screens/Canais';
 import { Clientes } from './screens/Clientes';
 import { RoadmapScreen } from './screens/RoadmapScreen';
 import { HistoricoCustos } from './screens/importacao/HistoricoCustos';
+import { ControleImportacao } from './screens/importacao/ControleImportacao';
 import { loadProcessedData, loadSalesBySku } from './data/loader';
 import { applyChannelFilter, applyChannelFilterToSales } from './data/aggregates';
 import type { CanalGrupo, ProcessedData, SalesBySkuPayload } from './data/types';
@@ -140,6 +141,7 @@ export function App() {
             {screen === 'g_relatorios' && <Relatorios />}
             {/* Importação — Controle de Importações */}
             {screen === 'imp_custos' && <HistoricoCustos />}
+            {screen === 'imp_pos' && <ControleImportacao />}
           </ErrorBoundary>
         </main>
       </div>

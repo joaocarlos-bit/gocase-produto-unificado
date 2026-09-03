@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react';
 import { Card } from '../../components/Card';
 import { KPICard } from '../../components/KPICard';
 import { MultiSelect } from '../../components/MultiSelect';
+import { Pager, paginate } from '../../components/Pager';
 import { TokenPrompt } from '../../components/TokenPrompt';
 import {
   MONDAY, getMondayToken, fetchPortfolio, fetchLaunchAllocation, isPendingLaunch, parseGroupMonth, MONTH_PT,
@@ -78,6 +79,22 @@ function findCalendarDelay(name: string): CalendarDelay | undefined {
 }
 function dataInicialDoLancamento(name: string): string {
   return findCalendarDelay(name)?.de || '—';
+}
+
+// "Abril/2027" (CALENDAR_DELAYS) vs "Abril 2027" (label do group do Monday) — normaliza pra comparar.
+const normMonthLabel = (s: string) => s.trim().toLowerCase().replace('/', ' ').replace(/\s+/g, ' ');
+
+/** Coluna única "Data de lançamento": só mostra a seta quando `from` é uma
+ *  data conhecida e diferente de `to` — senão mostra só o mês atual. */
+function LaunchDateCell({ from, to }: { from?: string; to: string }) {
+  if (!from || from === '—' || normMonthLabel(from) === normMonthLabel(to)) return <>{to}</>;
+  return (
+    <span className="ar-datechange">
+      <span className="ar-datechange__from">{from}</span>
+      <span className="ar-datechange__arrow">→</span>
+      <strong>{to}</strong>
+    </span>
+  );
 }
 
 // Snapshot do mês vigente (group do Monday) de cada lançamento do board 2027
@@ -459,6 +476,7 @@ export function AlocacaoRecurso() {
   const [catPersonFilter, setCatPersonFilter] = useState<string[]>([]);
   const [catStatusFilter, setCatStatusFilter] = useState<Health | null>(null);
   const [catNameFilter, setCatNameFilter] = useState<string | null>(null);
+  const [catTablePage, setCatTablePage] = useState(0);
 
   useEffect(() => {
     if (!getMondayToken()) { setState({ kind: 'no-token' }); return; }
@@ -741,21 +759,30 @@ export function AlocacaoRecurso() {
     && (catNameFilter === null || r.name === catNameFilter)
   ));
   const catFilteredRows = catBaseRows.filter((r) => catStatusFilter === null || r.health === catStatusFilter);
-  const toggleCatStatusFilter = (h: Health) => setCatStatusFilter((cur) => (cur === h ? null : h));
-  const toggleCatNameFilter = (name: string) => setCatNameFilter((cur) => (cur === name ? null : name));
+  const toggleCatStatusFilter = (h: Health) => { setCatStatusFilter((cur) => (cur === h ? null : h)); setCatTablePage(0); };
+  const toggleCatNameFilter = (name: string) => { setCatNameFilter((cur) => (cur === name ? null : name)); setCatTablePage(0); };
 
   const catHealthCounts: Record<Health, number> = { delayed: 0, atrisk: 0, attention: 0, ontrack: 0, other: 0, none: 0 };
   const catHealthRevenue: Record<Health, number> = { delayed: 0, atrisk: 0, attention: 0, ontrack: 0, other: 0, none: 0 };
   catBaseRows.forEach((r) => { catHealthCounts[r.health] += 1; catHealthRevenue[r.health] += r.receita; });
   const catBaseReceitaTotal = catBaseRows.reduce((s, r) => s + r.receita, 0);
+  const catMaxReceita = Math.max(1, ...Object.values(catHealthRevenue));
   const catStatusOptions = HEALTH_ORDER.filter((h) => catHealthCounts[h] > 0).map((h) => HEALTH_LABEL[h]);
   const catStatusFilterLabel = catStatusFilter ? HEALTH_LABEL[catStatusFilter] : null;
 
   const catReceitaTotal = catFilteredRows.reduce((s, r) => s + r.receita, 0);
   const catSemReceita = catFilteredRows.filter((r) => !r.hasReceita).length;
-  const catMaxReceita = Math.max(1, ...Object.values(catHealthRevenue));
 
   const catTableSorted = [...catFilteredRows].sort((a, b) => b.receita - a.receita || a.name.localeCompare(b.name, 'pt-BR'));
+  // Base da barrinha "Receita projetada" de cada linha: sem filtro de
+  // categoria, compara contra o total geral filtrado (catReceitaTotal) — com
+  // filtro de categoria ativo, compara cada lançamento só contra o total da
+  // PRÓPRIA categoria, senão uma categoria de ticket alto (ex. Malas) deixa
+  // os lançamentos de categorias menores com barra minúscula mesmo filtrando
+  // só por elas.
+  const catReceitaPorCategoria = new Map<string, number>();
+  catFilteredRows.forEach((r) => catReceitaPorCategoria.set(r.categoria, (catReceitaPorCategoria.get(r.categoria) || 0) + r.receita));
+  const receitaBaseDaLinha = (r: CatRow) => (catFilter.length > 0 ? (catReceitaPorCategoria.get(r.categoria) || 0) : catReceitaTotal);
 
   // ── Impacto de atrasos (receita potencialmente perdida) ────────────────
   // Perda = soma da receita mensal (Qtd × Preço) que a planilha de Projeções
@@ -855,6 +882,16 @@ export function AlocacaoRecurso() {
       };
     })
     .filter((e): e is DelayImpactRow => e !== null);
+
+  // "Status × receita": além da receita total por status (catHealthRevenue,
+  // acima), soma a perda estimada de cada status — usa delayImpactAll (não
+  // filtrado por categoria/ano/responsável/status) pro breakdown continuar
+  // mostrando todos os status, independente do filtro ativo, igual ao card
+  // de contagem ao lado. Só entram entradas com CatRow (hadRow) — atraso
+  // sintético (sem lançamento próprio no board) não tem status pra somar em.
+  const catHealthPerda: Record<Health, number> = { delayed: 0, atrisk: 0, attention: 0, ontrack: 0, other: 0, none: 0 };
+  delayImpactAll.forEach((e) => { if (e.row) catHealthPerda[e.row.health] += e.perdaEstimada; });
+
   // "row" só fica visível se o lançamento também passa nos filtros atuais da
   // aba (categoria/ano/responsável/status). Um atraso manual sem CatRow
   // correspondente (subelemento — ver comentário acima) não tem como ser
@@ -870,6 +907,23 @@ export function AlocacaoRecurso() {
     if (!info || info.mesesAtraso <= 0) return false;
     return !delayImpactAll.some((e) => e.name === c.name && e.year === c.year);
   });
+  // Fundida na tabela "Lançamentos por categoria" (ver coluna "Perda
+  // estimada") em vez de uma tabela própria, pra não repetir a mesma
+  // informação duas vezes na aba — delayByRowKey liga cada CatRow visível ao
+  // seu atraso calculado; syntheticDelayRows cobre os atrasos que não têm
+  // CatRow correspondente (subelementos do Monday, ex. "Tampa Copo Flow -
+  // Feminina") — entram como linhas extras no fim da tabela, sem
+  // categoria/status/receita (só a perda), sempre visíveis independente dos
+  // filtros da aba.
+  const delayByRowKey = new Map(delayImpact.filter((e): e is DelayImpactRow & { row: CatRow } => !!e.row).map((e) => [e.row.key, e]));
+  const syntheticDelayRows = delayImpact.filter((e) => !e.hadRow);
+
+  // Linhas normais + sintéticas (atrasos sem CatRow) numa lista só, pra paginar as duas juntas.
+  const catTableItems: ({ kind: 'row'; row: CatRow } | { kind: 'synthetic'; e: DelayImpactRow })[] = [
+    ...catTableSorted.map((row) => ({ kind: 'row' as const, row })),
+    ...syntheticDelayRows.map((e) => ({ kind: 'synthetic' as const, e })),
+  ];
+  const catTablePageItems = paginate(catTableItems, catTablePage, 15);
 
   return (
     <div className="g-eng">
@@ -1213,14 +1267,14 @@ export function AlocacaoRecurso() {
               <div className="ar-filterbar__grp">
                 <span className="ar-filterbar__lbl">Ano</span>
                 <div className="g-wl__period" style={{ marginBottom: 0 }}>
-                  <button className={`g-chip ${catYear === 'todos' ? 'g-chip--on' : ''}`} onClick={() => setCatYear('todos')}>Todos</button>
-                  <button className={`g-chip ${catYear === '2026' ? 'g-chip--on' : ''}`} onClick={() => setCatYear('2026')}>2026 ({catRows.filter((r) => r.year === '2026').length})</button>
-                  <button className={`g-chip ${catYear === '2027' ? 'g-chip--on' : ''}`} onClick={() => setCatYear('2027')}>2027 ({catRows.filter((r) => r.year === '2027').length})</button>
+                  <button className={`g-chip ${catYear === 'todos' ? 'g-chip--on' : ''}`} onClick={() => { setCatYear('todos'); setCatTablePage(0); }}>Todos</button>
+                  <button className={`g-chip ${catYear === '2026' ? 'g-chip--on' : ''}`} onClick={() => { setCatYear('2026'); setCatTablePage(0); }}>2026 ({catRows.filter((r) => r.year === '2026').length})</button>
+                  <button className={`g-chip ${catYear === '2027' ? 'g-chip--on' : ''}`} onClick={() => { setCatYear('2027'); setCatTablePage(0); }}>2027 ({catRows.filter((r) => r.year === '2027').length})</button>
                 </div>
               </div>
               <div className="ar-filterbar__grp">
                 <span className="ar-filterbar__lbl">Categoria</span>
-                <MultiSelect options={catOptions} value={catFilter} onChange={setCatFilter} allLabel="Todas" placeholder="Selecionar categoria" />
+                <MultiSelect options={catOptions} value={catFilter} onChange={(next) => { setCatFilter(next); setCatTablePage(0); }} allLabel="Todas" placeholder="Selecionar categoria" />
               </div>
               <div className="ar-filterbar__grp">
                 <span className="ar-filterbar__lbl">Status</span>
@@ -1230,6 +1284,7 @@ export function AlocacaoRecurso() {
                   onChange={(next) => {
                     const label = next[next.length - 1] as string | undefined;
                     setCatStatusFilter(label ? HEALTH_ORDER.find((h) => HEALTH_LABEL[h] === label) ?? null : null);
+                    setCatTablePage(0);
                   }}
                   allLabel="Todos"
                   placeholder="Selecionar status"
@@ -1238,7 +1293,7 @@ export function AlocacaoRecurso() {
               </div>
               <div className="ar-filterbar__grp">
                 <span className="ar-filterbar__lbl">Responsável</span>
-                <MultiSelect options={catPersonOptions} value={catPersonFilter} onChange={setCatPersonFilter} allLabel="Todos" placeholder="Selecionar responsável" />
+                <MultiSelect options={catPersonOptions} value={catPersonFilter} onChange={(next) => { setCatPersonFilter(next); setCatTablePage(0); }} allLabel="Todos" placeholder="Selecionar responsável" />
               </div>
               {(catFilter.length > 0 || catPersonFilter.length > 0 || catStatusFilterLabel) && (
                 <div className="ar-cat-chips">
@@ -1278,60 +1333,6 @@ export function AlocacaoRecurso() {
               accent="yellow"
             />
           </div>
-
-          {delayImpactVisible.length > 0 && (
-            <Card
-              title="Impacto de atrasos"
-              subtitle="Receita dos meses perdidos (mês original até o mês novo), lida da curva mensal da planilha de Projeções · clique numa linha pra ver o detalhe mês a mês"
-              right={<span className="ar-delay-total">{fmtBRL(delayTotal)}</span>}
-            >
-              <div className="g-tablewrap">
-                <table className="g-table">
-                  <thead>
-                    <tr>
-                      <th>Lançamento</th>
-                      <th>Categoria</th>
-                      <th>De → Para</th>
-                      <th className="c">Meses de atraso</th>
-                      <th className="c">Receita projetada</th>
-                      <th className="c">Perda estimada</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {delayImpactVisible.map((e) => (
-                      <tr
-                        key={e.name}
-                        className="ar-clickrow"
-                        onClick={() => setDelayDetail({ name: e.name, mesOriginal: e.mesOriginal, mesNovo: e.mesNovo, splitNota: e.splitNota, meses: e.meses, total: e.perdaEstimada })}
-                      >
-                        <td className="g-name">
-                          <span className="g-name__text">{e.name}</span>
-                          {e.auto && <span className="ar-auto-badge" title="Detectado automaticamente: o group no Monday já mudou pra depois do mês registrado em LAUNCH_MONTH_BASELINE_2027.">auto</span>}
-                        </td>
-                        <td>{e.row && <CategoriaBadge categoria={e.row.categoria} />}</td>
-                        <td className="m">{e.mesOriginal} → {e.mesNovo}</td>
-                        <td className="c b">{e.mesesAtraso}</td>
-                        <td className="c">{e.row?.receita != null ? fmtBRL(e.row.receita) : <span className="g-mut">—</span>}</td>
-                        <td className="c b ar-delay-loss">
-                          {fmtBRL(e.perdaEstimada)}
-                          {e.splitNota && <span className="ar-note-inline" title={e.splitNota}>*</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {delayImpactVisible.some((e) => e.splitNota) && (
-                <p className="ar-note">* linha da planilha de Projeções compartilhada entre duas variantes do Monday — receita mensal dividida 50/50 entre elas.</p>
-              )}
-              {delayImpactExcluidos.length > 0 && (
-                <p className="ar-note">Só entram aqui lançamentos com receita mensal preenchida na planilha pros meses perdidos — {delayImpactExcluidos.length} atraso{delayImpactExcluidos.length !== 1 ? 's' : ''} conhecido{delayImpactExcluidos.length !== 1 ? 's' : ''} sem essa curva ainda fica{delayImpactExcluidos.length !== 1 ? 'm' : ''} de fora da estimativa: {delayImpactExcluidos.map((r) => r.name).join(', ')}.</p>
-              )}
-              {delayImpact.length > delayImpactVisible.length && (
-                <p className="ar-note">{delayImpact.length - delayImpactVisible.length} lançamento(s) atrasado(s) fora do filtro atual (categoria/ano/responsável) não aparecem na tabela acima.</p>
-              )}
-            </Card>
-          )}
 
           {catFilteredRows.length === 0 ? (
             <Card title="Categorias"><div className="g-empty">Nenhum lançamento pendente {catFilter.length ? 'nessa(s) categoria(s)' : ''}.</div></Card>
@@ -1387,7 +1388,7 @@ export function AlocacaoRecurso() {
                   </div>
                 </Card>
 
-                <Card title="Status × receita" subtitle="Receita projetada em risco — soma de receita por status · clique num status pra filtrar a aba inteira">
+                <Card title="Status × receita" subtitle="Receita projetada por status · atrasados também mostram a perda estimada e o % dela sobre a receita · clique num status pra filtrar a aba inteira">
                   {catBaseReceitaTotal === 0 ? (
                     <div className="g-empty">Nenhum lançamento filtrado tem receita casada com a planilha.</div>
                   ) : (
@@ -1410,13 +1411,14 @@ export function AlocacaoRecurso() {
                       </div>
                       <div className="g-tablewrap" style={{ marginTop: 12 }}>
                         <table className="g-table">
-                          <thead><tr><th>Status</th><th className="c">Receita</th><th className="c">%</th></tr></thead>
+                          <thead><tr><th>Status</th><th className="c">Receita</th><th className="c">Perda estimada</th><th className="c">%</th></tr></thead>
                           <tbody>
                             {HEALTH_ORDER.filter((h) => catHealthRevenue[h] > 0).map((h) => (
                               <tr key={h} className="ar-clickrow" onClick={() => toggleCatStatusFilter(h)} style={catStatusFilter === h ? { background: 'var(--brand-blue-l)' } : undefined}>
                                 <td><span className={`ar-pill ${HEALTH_CLASS[h]}`}>{HEALTH_LABEL[h]}</span></td>
                                 <td className="c b">{fmtBRL(catHealthRevenue[h])}</td>
-                                <td className="c">{Math.round((catHealthRevenue[h] / catBaseReceitaTotal) * 100)}%</td>
+                                <td className={`c b ${catHealthPerda[h] > 0 ? 'ar-delay-loss' : ''}`}>{catHealthPerda[h] > 0 ? fmtBRL(catHealthPerda[h]) : <span className="g-mut">—</span>}</td>
+                                <td className="c">{catHealthPerda[h] > 0 ? `${Math.round((catHealthPerda[h] / catHealthRevenue[h]) * 100)}%` : <span className="g-mut">—</span>}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -1430,24 +1432,56 @@ export function AlocacaoRecurso() {
                 </Card>
               </div>
 
-              <Card title="Lançamentos por categoria" subtitle={`${catTableSorted.length} lançamentos pendentes — ordenados por receita · clique numa linha pra filtrar a aba inteira por ela`}>
+              <Card
+                title="Lançamentos por categoria"
+                subtitle={`${catTableSorted.length} lançamentos pendentes — ordenados por receita · clique numa linha pra filtrar a aba inteira por ela · clique na perda estimada pra ver o detalhe mês a mês`}
+                right={delayTotal > 0 ? <span className="ar-delay-total" title="Receita potencialmente perdida com os atrasos conhecidos">{fmtBRL(delayTotal)}</span> : undefined}
+              >
                 <div className="g-tablewrap">
                   <table className="g-table">
                     <thead>
                       <tr>
                         <th>Categoria</th>
                         <th>Lançamento</th>
-                        <th>Data inicial</th>
-                        <th>Mês/Grupo</th>
+                        <th>Data de lançamento</th>
                         <th>Meses de atraso</th>
                         <th>Ano</th>
                         <th>Status</th>
                         <th className="c">Receita projetada</th>
+                        <th className="c">Perda estimada</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {catTableSorted.map((r) => {
-                        const pct = catReceitaTotal > 0 ? Math.round((r.receita / catReceitaTotal) * 100) : 0;
+                      {catTablePageItems.map((item) => {
+                        if (item.kind === 'synthetic') {
+                          const e = item.e;
+                          return (
+                            <tr
+                              key={`synthetic:${e.name}:${e.year}`}
+                              className="ar-clickrow"
+                              onClick={() => setDelayDetail({ name: e.name, mesOriginal: e.mesOriginal, mesNovo: e.mesNovo, splitNota: e.splitNota, meses: e.meses, total: e.perdaEstimada })}
+                            >
+                              <td><span className="g-mut">—</span></td>
+                              <td className="g-name">
+                                <span className="g-name__text">{e.name}</span>
+                                {e.auto && <span className="ar-auto-badge" title="Detectado automaticamente: o group no Monday já mudou pra depois do mês registrado em LAUNCH_MONTH_BASELINE_2027.">auto</span>}
+                              </td>
+                              <td className="m"><LaunchDateCell from={e.mesOriginal} to={e.mesNovo} /></td>
+                              <td className="m">{e.mesesAtraso}</td>
+                              <td className="m">{e.year}</td>
+                              <td><span className="g-mut">—</span></td>
+                              <td className="c"><span className="g-mut">—</span></td>
+                              <td className="c b ar-delay-loss">
+                                {fmtBRL(e.perdaEstimada)}
+                                {e.splitNota && <span className="ar-note-inline" title={e.splitNota}>*</span>}
+                              </td>
+                            </tr>
+                          );
+                        }
+                        const r = item.row;
+                        const base = receitaBaseDaLinha(r);
+                        const pct = base > 0 ? Math.round((r.receita / base) * 100) : 0;
+                        const delay = delayByRowKey.get(r.key);
                         return (
                           <tr
                             key={r.key}
@@ -1456,9 +1490,11 @@ export function AlocacaoRecurso() {
                             style={catNameFilter === r.name ? { background: 'var(--brand-blue-l)' } : undefined}
                           >
                             <td><CategoriaBadge categoria={r.categoria} /></td>
-                            <td className="g-name"><span className="g-name__text">{r.name}</span></td>
-                            <td className="m">{r.dataInicial}</td>
-                            <td className="m">{r.mesAno}</td>
+                            <td className="g-name">
+                              <span className="g-name__text">{r.name}</span>
+                              {delay?.auto && <span className="ar-auto-badge" title="Detectado automaticamente: o group no Monday já mudou pra depois do mês registrado em LAUNCH_MONTH_BASELINE_2027.">auto</span>}
+                            </td>
+                            <td className="m"><LaunchDateCell from={r.dataInicial} to={r.mesAno} /></td>
                             <td className="m">{r.mesesAtraso}</td>
                             <td className="m">{r.year}</td>
                             <td>
@@ -1476,12 +1512,36 @@ export function AlocacaoRecurso() {
                                 </div>
                               ) : <span className="g-mut">—</span>}
                             </td>
+                            <td
+                              className={`c b ${delay ? 'ar-delay-loss ar-clickrow' : ''}`}
+                              onClick={delay ? (ev) => { ev.stopPropagation(); setDelayDetail({ name: delay.name, mesOriginal: delay.mesOriginal, mesNovo: delay.mesNovo, splitNota: delay.splitNota, meses: delay.meses, total: delay.perdaEstimada }); } : undefined}
+                            >
+                              {delay ? (
+                                <>
+                                  {fmtBRL(delay.perdaEstimada)}
+                                  {delay.splitNota && <span className="ar-note-inline" title={delay.splitNota}>*</span>}
+                                </>
+                              ) : <span className="g-mut">—</span>}
+                            </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
                 </div>
+                <Pager page={catTablePage} total={catTableItems.length} pageSize={15} onChange={setCatTablePage} />
+                {(delayByRowKey.size > 0 || syntheticDelayRows.length > 0) && [...delayByRowKey.values(), ...syntheticDelayRows].some((e) => e.splitNota) && (
+                  <p className="ar-note">* linha da planilha de Projeções compartilhada entre duas variantes do Monday — receita mensal dividida 50/50 entre elas.</p>
+                )}
+                {syntheticDelayRows.length > 0 && (
+                  <p className="ar-note">{syntheticDelayRows.length} das linhas acima {syntheticDelayRows.length !== 1 ? 'são' : 'é'} atraso{syntheticDelayRows.length !== 1 ? 's' : ''} sem lançamento próprio no board (subelemento do Monday) — por isso sem categoria/status/receita projetada, só a perda estimada.</p>
+                )}
+                {delayImpactExcluidos.length > 0 && (
+                  <p className="ar-note">Perda estimada só é calculada com receita mensal preenchida na planilha pros meses perdidos — {delayImpactExcluidos.length} atraso{delayImpactExcluidos.length !== 1 ? 's' : ''} conhecido{delayImpactExcluidos.length !== 1 ? 's' : ''} sem essa curva ainda fica{delayImpactExcluidos.length !== 1 ? 'm' : ''} de fora da estimativa: {delayImpactExcluidos.map((r) => r.name).join(', ')}.</p>
+                )}
+                {delayImpact.length > delayImpactVisible.length && (
+                  <p className="ar-note">{delayImpact.length - delayImpactVisible.length} lançamento(s) atrasado(s) fora do filtro atual (categoria/ano/responsável) não têm perda estimada visível na tabela acima.</p>
+                )}
               </Card>
             </>
           )}
@@ -1747,6 +1807,9 @@ export function AlocacaoRecurso() {
         .ar-delay-total { font-size: 18px; font-weight: 900; color: var(--red); font-variant-numeric: tabular-nums; }
         .ar-delay-loss { color: var(--red); }
         .ar-note-inline { color: var(--text-3); margin-left: 3px; cursor: help; }
+        .ar-datechange { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+        .ar-datechange__from { color: var(--text-3); text-decoration: line-through; }
+        .ar-datechange__arrow { color: var(--text-3); }
         .ar-auto-badge { display: inline-block; margin-left: 7px; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; color: var(--brand-blue); background: var(--brand-blue-l); border: 1px solid var(--brand-blue); border-radius: 4px; padding: 1px 5px; vertical-align: middle; cursor: help; }
         .ar-status-raw { display: block; font-size: 10px; color: var(--text-3); margin-top: 2px; }
 
