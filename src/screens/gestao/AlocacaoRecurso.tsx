@@ -23,6 +23,7 @@ import {
 } from '../../data/monday';
 import { TEAM, matchTeamKey, teamMemberByKey, hasLeftTeam, type TeamMember } from '../../data/team';
 import { fetchSheetLancamentos, buildSheetIndex, matchSheetRow, type SheetLancRow, type SheetIndex } from '../../data/sheetsLancamentos';
+import launchMonthBaseline2027 from '../../data/launchMonthBaseline2027.json';
 
 const FOCUS_GROUPS = ['OKRs 26.2', 'Projetos de IA/Tech'];
 
@@ -45,27 +46,31 @@ const fmtBRL = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency'
 
 // Atrasos conhecidos informados manualmente ("de"/"para" — o Monday não
 // guarda histórico de mudança de grupo/mês via API, então não dá pra saber
-// pelo board quando um lançamento "deveria" ter saído nem pra onde foi
-// reagendado; group só mostra o mês vigente, que às vezes nem chega a ser
-// atualizado quando o atraso é só previsto internamente). A partir daqui,
-// "Meses de atraso" e a perda em R$ do card "Impacto de atrasos" são
-// calculados automaticamente (ver paraEfetivo/delayInfoDoLancamento e
-// DELAY_EVENTS mais abaixo) — não precisa mais digitar os dois à mão.
-// Lançamento fora dessa lista mostra "—" em "Data inicial"/"Meses de atraso".
-interface CalendarDelay { name: string; de: string; para: string; prefix?: boolean }
+// pelo board quando um lançamento "deveria" ter saído; group só mostra o mês
+// vigente, que às vezes nem chega a ser atualizado quando o atraso é só
+// previsto internamente). "para" aqui é o PISO conhecido — se o group do
+// Monday já mostrar um mês mais tarde que isso, esse mês mais tarde vence
+// (ver delayInfoDoLancamento), então um atraso que piorar ainda mais é
+// pego automaticamente assim que o board for atualizado. "de"/"para" sempre
+// com "/ano" explícito pra não depender do ano do board (Go Clip/Garrafa
+// GoClip atravessam virada de ano: Setembro/2026 → Janeiro/2027).
+// Lançamento fora dessa lista (e sem baseline — ver LAUNCH_MONTH_BASELINE_2027
+// abaixo) mostra "—" em "Data inicial"/"Meses de atraso".
+interface CalendarDelay { name: string; de: string; para: string; year: 2026 | 2027; prefix?: boolean }
 const CALENDAR_DELAYS: CalendarDelay[] = [
-  { name: 'Copo Flow (Vibe Facelift)', de: 'Junho', para: 'Outubro' },
+  { name: 'Copo Flow (Vibe Facelift)', de: 'Junho/2026', para: 'Outubro/2026', year: 2026 },
   // prefix: true casa qualquer variante do produto (ex.: "Copo Moove 420ml (Café)").
-  { name: 'Copo Moove', de: 'Junho', para: 'Outubro', prefix: true },
-  { name: 'Go Clip - Novas Cores', de: 'Setembro', para: 'Janeiro' },
-  { name: 'Garrafa Fun Tricolor + Alça', de: 'Outubro', para: 'Novembro' },
-  { name: 'Food Jar', de: 'Outubro', para: 'Dezembro', prefix: true },
-  { name: 'Copo Life - Tampa PP', de: 'Março/2027', para: 'Maio/2027' },
-  { name: 'Garrafa Pro - Facelift', de: 'Abril/2027', para: 'Junho/2027' },
-  { name: 'Garrafa Magsafe - Facelift', de: 'Abril/2027', para: 'Julho/2027' },
-  { name: 'Garrafa GoClip', de: 'Setembro', para: 'Janeiro' },
-  { name: 'Marmita Fun', de: 'Outubro', para: 'Novembro' },
-  { name: 'Tampa Copo Flow - Feminina', de: 'Janeiro/2027', para: 'Maio/2027' },
+  { name: 'Copo Moove', de: 'Junho/2026', para: 'Outubro/2026', year: 2026, prefix: true },
+  { name: 'Go Clip - Novas Cores', de: 'Setembro/2026', para: 'Janeiro/2027', year: 2026 },
+  { name: 'Garrafa Fun Tricolor + Alça', de: 'Outubro/2026', para: 'Novembro/2026', year: 2026 },
+  { name: 'Food Jar', de: 'Outubro/2026', para: 'Dezembro/2026', year: 2026, prefix: true },
+  { name: 'Garrafa GoClip', de: 'Setembro/2026', para: 'Janeiro/2027', year: 2026 },
+  { name: 'Marmita Fun', de: 'Outubro/2026', para: 'Novembro/2026', year: 2026 },
+  { name: 'Copo Life - Tampa PP', de: 'Março/2027', para: 'Julho/2027', year: 2027 },
+  { name: 'Garrafa Pro - Facelift', de: 'Abril/2027', para: 'Junho/2027', year: 2027 },
+  { name: 'Garrafa Magsafe - Facelift', de: 'Abril/2027', para: 'Julho/2027', year: 2027 },
+  { name: 'Tampa Copo Flow - Feminina', de: 'Janeiro/2027', para: 'Maio/2027', year: 2027 },
+  { name: 'Mala P0', de: 'Março/2027', para: 'Maio/2027', year: 2027 },
 ];
 function findCalendarDelay(name: string): CalendarDelay | undefined {
   const n = norm(name);
@@ -74,6 +79,16 @@ function findCalendarDelay(name: string): CalendarDelay | undefined {
 function dataInicialDoLancamento(name: string): string {
   return findCalendarDelay(name)?.de || '—';
 }
+
+// Snapshot do mês vigente (group do Monday) de cada lançamento do board 2027
+// que AINDA não tem atraso conhecido no CALENDAR_DELAYS acima — registrado
+// pra detectar automaticamente se algum deles vier a atrasar no futuro (o
+// group mudar pra um mês depois deste). Não inclui os 5 já cobertos acima
+// (esses usam "de" manual, mais preciso que o snapshot). Prazo pra
+// re-registrar: se um lançamento daqui atrasar de verdade, mova-o pra
+// CALENDAR_DELAYS com o "de" certo (esse arquivo não se atualiza sozinho).
+const LAUNCH_MONTH_BASELINE_2027: Record<string, string> = launchMonthBaseline2027 as Record<string, string>;
+const normBaseline = (s: string) => norm(s).replace(/\s+/g, ' ').trim();
 
 // ── Aritmética de mês (ano, mês 0-based) — atraso e perda estimada ────────
 interface YM { year: number; month: number }
@@ -86,20 +101,28 @@ const ymAdd = (ym: YM, delta: number): YM => {
 const ymDiff = (a: YM, b: YM) => ymKey(b) - ymKey(a);
 const ymLabel = (ym: YM) => `${MONTH_PT[ym.month]}/${ym.year}`;
 
-/** Interpreta "Junho" ou "Março/2027" (formato do CALENDAR_DELAYS) num
- *  {year,month} — sem ano explícito, assume o ano do próprio board (2026/2027)
- *  do lançamento. */
+/** Interpreta "Junho/2026" (formato do CALENDAR_DELAYS, sempre com ano) num
+ *  {year,month}. */
 function parseDelayMonth(text: string, fallbackYear: number): YM | null {
   const parsed = parseGroupMonth(text.replace('/', ' '));
+  if (!parsed) return null;
+  return { year: parsed.year ?? fallbackYear, month: parsed.month };
+}
+/** Mês do group do Monday (ex. "April 2027 (Easter)") num {year,month} — usa
+ *  fallbackYear só se o group não tiver ano (raro). Lembrete: sempre o group
+ *  do item, nunca a data de um subelemento/subitem dele. */
+function groupToYM(group: string | null | undefined, fallbackYear: number): YM | null {
+  if (!group) return null;
+  const parsed = parseGroupMonth(group);
   if (!parsed) return null;
   return { year: parsed.year ?? fallbackYear, month: parsed.month };
 }
 
 const HOJE = new Date();
 const HOJE_YM: YM = { year: HOJE.getFullYear(), month: HOJE.getMonth() };
-/** Regra do dia 15: se o mês gravado em "para" já virou, ou já passou do dia
- *  15 dele, considera que esse mês também já era perdido e empurra o atraso
- *  pro mês seguinte — sem esperar alguém atualizar o CALENDAR_DELAYS nem
+/** Regra do dia 15: se o mês em questão já virou, ou já passou do dia 15
+ *  dele, considera que esse mês também já era perdido e empurra o atraso pro
+ *  mês seguinte — sem esperar alguém atualizar o CALENDAR_DELAYS nem
  *  depender do Monday ter mudado o group. */
 function paraEfetivo(paraYM: YM): YM {
   const cmp = ymCompare(paraYM, HOJE_YM);
@@ -108,17 +131,33 @@ function paraEfetivo(paraYM: YM): YM {
 }
 
 interface DelayInfo { de: YM; para: YM; paraEfetivo: YM; mesesAtraso: number }
-function delayInfoDoLancamento(name: string, fallbackYear: number): DelayInfo | null {
+/** `liveGroup` é o group ATUAL do item no Monday (não um subitem) — usado
+ *  pra pegar atrasos que já foram além do "para" manual, ou (quando não há
+ *  entrada manual) detectar um atraso novo num lançamento 2027 comparando
+ *  com LAUNCH_MONTH_BASELINE_2027. */
+function delayInfoDoLancamento(name: string, fallbackYear: number, liveGroup: string | null | undefined): DelayInfo | null {
   const entry = findCalendarDelay(name);
-  if (!entry) return null;
-  const de = parseDelayMonth(entry.de, fallbackYear);
-  const para = parseDelayMonth(entry.para, fallbackYear);
-  if (!de || !para) return null;
-  const efetivo = paraEfetivo(para);
-  return { de, para, paraEfetivo: efetivo, mesesAtraso: Math.max(0, ymDiff(de, efetivo)) };
+  if (entry) {
+    const de = parseDelayMonth(entry.de, entry.year);
+    const paraManual = parseDelayMonth(entry.para, entry.year);
+    if (!de || !paraManual) return null;
+    const paraLive = groupToYM(liveGroup, entry.year);
+    const para = paraLive && ymCompare(paraLive, paraManual) > 0 ? paraLive : paraManual;
+    const efetivo = paraEfetivo(para);
+    return { de, para, paraEfetivo: efetivo, mesesAtraso: Math.max(0, ymDiff(de, efetivo)) };
+  }
+  if (fallbackYear !== 2027) return null;
+  const baseline = LAUNCH_MONTH_BASELINE_2027[normBaseline(name)];
+  if (!baseline) return null;
+  const [by, bm] = baseline.split('-').map(Number);
+  const de: YM = { year: by, month: bm - 1 };
+  const paraLive = groupToYM(liveGroup, 2027);
+  if (!paraLive || ymCompare(paraLive, de) <= 0) return null; // ainda no mês registrado (ou "voltou") — sem atraso novo
+  const efetivo = paraEfetivo(paraLive);
+  return { de, para: paraLive, paraEfetivo: efetivo, mesesAtraso: Math.max(0, ymDiff(de, efetivo)) };
 }
-function mesesAtrasoDoLancamento(name: string, fallbackYear: number): string {
-  const info = delayInfoDoLancamento(name, fallbackYear);
+function mesesAtrasoDoLancamento(name: string, fallbackYear: number, liveGroup: string | null | undefined): string {
+  const info = delayInfoDoLancamento(name, fallbackYear, liveGroup);
   return info ? String(info.mesesAtraso) : '—';
 }
 
@@ -662,7 +701,7 @@ export function AlocacaoRecurso() {
     const name = stripCategoryTag(it.name);
     const mesAno = parseGroupMonth(it.group)?.label || it.group;
     const dataInicial = dataInicialDoLancamento(name);
-    const mesesAtraso = mesesAtrasoDoLancamento(name, Number(year));
+    const mesesAtraso = mesesAtrasoDoLancamento(name, Number(year), it.group);
     if (it.receita != null) {
       return { key: `${year}:${it.id}`, name, categoria, health: healthOf(it.launchStatus), statusRaw: it.launchStatus, receita: it.receita, hasReceita: true, group: it.group, mesAno, dataInicial, mesesAtraso, year, people };
     }
@@ -718,11 +757,11 @@ export function AlocacaoRecurso() {
 
   const catTableSorted = [...catFilteredRows].sort((a, b) => b.receita - a.receita || a.name.localeCompare(b.name, 'pt-BR'));
 
-  // ── Lançamentos Delayed sem "de"/"para" no CALENDAR_DELAYS ──────────────
-  // Sem uma entrada lá a gente não sabe o mês original, então nem "Meses de
-  // atraso" nem "Impacto de atrasos" conseguem calcular nada pra eles.
+  // ── Lançamentos Delayed sem info suficiente pra calcular o atraso ───────
+  // Nem CALENDAR_DELAYS (manual) nem LAUNCH_MONTH_BASELINE_2027 (baseline
+  // automático, só 2027) conseguem dizer o mês original desses.
   const delayedSemDataInicial = catBaseRows
-    .filter((r) => r.health === 'delayed' && !findCalendarDelay(r.name))
+    .filter((r) => r.health === 'delayed' && !delayInfoDoLancamento(r.name, Number(r.year), r.group))
     .sort((a, b) => a.mesAno.localeCompare(b.mesAno, 'pt-BR') || a.name.localeCompare(b.name, 'pt-BR'));
 
   // ── Impacto de atrasos (receita potencialmente perdida) ────────────────
@@ -767,16 +806,32 @@ export function AlocacaoRecurso() {
     return null;
   }
 
+  // Candidatos a "atraso com perda calculável": toda entrada manual do
+  // CALENDAR_DELAYS (mesmo sem um CatRow correspondente — ex. "Tampa Copo
+  // Flow - Feminina"/"Copo Life - Tampa PP" são subelementos, não aparecem
+  // como item próprio nos boards) + todo lançamento 2027 SEM entrada manual
+  // (pra detecção automática via LAUNCH_MONTH_BASELINE_2027 dentro de
+  // delayInfoDoLancamento — group já mudou pra depois do mês registrado).
+  interface DelayCandidate { name: string; year: '2026' | '2027'; group: string | null; row: CatRow | undefined; auto: boolean }
+  const manualDelayCandidates: DelayCandidate[] = CALENDAR_DELAYS.map((entry) => {
+    const row = catRows.find((r) => Number(r.year) === entry.year && (entry.prefix ? norm(r.name).startsWith(norm(entry.name)) : norm(r.name) === norm(entry.name)));
+    return { name: entry.name, year: String(entry.year) as '2026' | '2027', group: row?.group ?? null, row, auto: false };
+  });
+  const autoDelayCandidates: DelayCandidate[] = catRows
+    .filter((r) => r.year === '2027' && !findCalendarDelay(r.name))
+    .map((r): DelayCandidate => ({ name: r.name, year: r.year, group: r.group, row: r, auto: true }));
+  const delayCandidates = [...manualDelayCandidates, ...autoDelayCandidates];
+
   interface DelayMonthDetail { label: string; qty: number; receita: number }
   interface DelayImpactRow {
     name: string; year: '2026' | '2027'; mesOriginal: string; mesNovo: string; mesesAtraso: number;
-    perdaEstimada: number; splitNota?: string; row: CatRow | undefined; meses: DelayMonthDetail[];
+    perdaEstimada: number; splitNota?: string; row: CatRow | undefined; meses: DelayMonthDetail[]; auto: boolean; hadRow: boolean;
   }
-  const delayImpactAll: DelayImpactRow[] = catRows
-    .map((r): DelayImpactRow | null => {
-      const info = delayInfoDoLancamento(r.name, Number(r.year));
+  const delayImpactAll: DelayImpactRow[] = delayCandidates
+    .map((c): DelayImpactRow | null => {
+      const info = delayInfoDoLancamento(c.name, Number(c.year), c.group);
       if (!info || info.mesesAtraso <= 0) return null;
-      const match = findSheetRowForDelay(r.name, sheetIndex);
+      const match = findSheetRowForDelay(c.name, sheetIndex);
       if (!match) return null;
       const qtyByYm = new Map(match.row.quantidadeMensal.map((mv) => [ymKey(mv), mv.value]));
       const meses: DelayMonthDetail[] = [];
@@ -795,27 +850,32 @@ export function AlocacaoRecurso() {
       // `meses` já sai em ordem cronológica — receitaMensal é lido na mesma
       // ordem das colunas do cabeçalho da planilha (crescente no tempo).
       return {
-        name: r.name, year: r.year, mesOriginal: ymLabel(info.de), mesNovo: ymLabel(info.para), mesesAtraso: info.mesesAtraso,
+        name: c.name, year: c.year, mesOriginal: ymLabel(info.de), mesNovo: ymLabel(info.para), mesesAtraso: info.mesesAtraso,
         perdaEstimada: perda / match.splitEntre,
         splitNota: match.splitEntre > 1
           ? `Divide a linha "${match.row.lancamento}" da planilha de Projeções com outra variante do Monday — receita mensal (e quantidade) dividida igualmente entre elas.`
           : undefined,
-        row: r,
+        row: c.row,
         meses,
+        auto: c.auto,
+        hadRow: !!c.row,
       };
     })
     .filter((e): e is DelayImpactRow => e !== null);
   // "row" só fica visível se o lançamento também passa nos filtros atuais da
-  // aba (categoria/ano/responsável/status) — mesmo comportamento de antes.
-  const delayImpact = delayImpactAll.map((e) => ({ ...e, row: catFilteredRows.includes(e.row!) ? e.row : undefined }));
-  const delayImpactVisible = delayImpact.filter((e) => e.row);
+  // aba (categoria/ano/responsável/status). Um atraso manual sem CatRow
+  // correspondente (subelemento — ver comentário acima) não tem como ser
+  // filtrado assim, então fica sempre visível.
+  const delayImpact = delayImpactAll.map((e) => ({ ...e, row: e.row && catFilteredRows.includes(e.row) ? e.row : undefined }));
+  const delayImpactVisible = delayImpact.filter((e) => !e.hadRow || e.row);
   const delayTotal = delayImpactVisible.reduce((s, e) => s + e.perdaEstimada, 0);
-  // Atrasos conhecidos (têm "de"/"para") mas sem curva mensal utilizável na
-  // janela perdida — ficam de fora da tabela, listados na nota abaixo dela.
-  const delayImpactExcluidos = catRows.filter((r) => {
-    const info = delayInfoDoLancamento(r.name, Number(r.year));
+  // Atrasos conhecidos (manuais, ou detectados via baseline) mas sem curva
+  // mensal utilizável na janela perdida — ficam de fora da tabela, listados
+  // na nota abaixo dela.
+  const delayImpactExcluidos = delayCandidates.filter((c) => {
+    const info = delayInfoDoLancamento(c.name, Number(c.year), c.group);
     if (!info || info.mesesAtraso <= 0) return false;
-    return !delayImpactAll.some((e) => e.name === r.name && e.year === r.year);
+    return !delayImpactAll.some((e) => e.name === c.name && e.year === c.year);
   });
 
   return (
@@ -1251,7 +1311,10 @@ export function AlocacaoRecurso() {
                         className="ar-clickrow"
                         onClick={() => setDelayDetail({ name: e.name, mesOriginal: e.mesOriginal, mesNovo: e.mesNovo, splitNota: e.splitNota, meses: e.meses, total: e.perdaEstimada })}
                       >
-                        <td className="g-name"><span className="g-name__text">{e.name}</span></td>
+                        <td className="g-name">
+                          <span className="g-name__text">{e.name}</span>
+                          {e.auto && <span className="ar-auto-badge" title="Detectado automaticamente: o group no Monday já mudou pra depois do mês registrado em LAUNCH_MONTH_BASELINE_2027.">auto</span>}
+                        </td>
                         <td>{e.row && <CategoriaBadge categoria={e.row.categoria} />}</td>
                         <td className="m">{e.mesOriginal} → {e.mesNovo}</td>
                         <td className="c b">{e.mesesAtraso}</td>
@@ -1714,6 +1777,7 @@ export function AlocacaoRecurso() {
         .ar-delay-total { font-size: 18px; font-weight: 900; color: var(--red); font-variant-numeric: tabular-nums; }
         .ar-delay-loss { color: var(--red); }
         .ar-note-inline { color: var(--text-3); margin-left: 3px; cursor: help; }
+        .ar-auto-badge { display: inline-block; margin-left: 7px; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; color: var(--brand-blue); background: var(--brand-blue-l); border: 1px solid var(--brand-blue); border-radius: 4px; padding: 1px 5px; vertical-align: middle; cursor: help; }
         .ar-status-raw { display: block; font-size: 10px; color: var(--text-3); margin-top: 2px; }
 
         .ar-rowbar { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
