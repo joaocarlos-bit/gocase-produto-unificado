@@ -26,6 +26,10 @@ export interface SheetLancRow {
    *  planilha (à direita das colunas anuais V/W) — vazio se o cabeçalho não
    *  tiver esse bloco. Usado pro cálculo de "Impacto de atrasos". */
   receitaMensal: MonthlyValue[];
+  /** Quantidade mês a mês, lida do 1º bloco de colunas mensais (mesmos meses
+   *  de receitaMensal, na mesma ordem) — vazio se o cabeçalho não tiver esse
+   *  bloco. Usado no detalhe (modal) do "Impacto de atrasos". */
+  quantidadeMensal: MonthlyValue[];
 }
 
 const isSerialDate = (v: unknown): v is number => typeof v === 'number' && v > 40000 && v < 60000;
@@ -58,8 +62,16 @@ export async function fetchSheetLancamentos(): Promise<SheetLancRow[]> {
   const json = await res.json();
   const allRows: any[][] = json.values || [];
   const header = allRows[0] || [];
-  const revenueRun = findDateRuns(header)[2] || null; // 1º=Qtd, 2º=Preço, 3º=Receita
+  const dateRuns = findDateRuns(header); // 1º=Qtd, 2º=Preço, 3º=Receita
+  const qtyRun = dateRuns[0] || null;
+  const revenueRun = dateRuns[2] || null;
   const num = (v: any) => (typeof v === 'number' ? v : 0);
+  const readMonthly = (r: any[], run: { start: number; end: number } | null): MonthlyValue[] => {
+    if (!run) return [];
+    const out: MonthlyValue[] = [];
+    for (let i = run.start; i <= run.end; i++) out.push({ ...serialToYM(header[i]), value: num(r[i]) });
+    return out;
+  };
   return allRows
     .slice(1) // descarta cabeçalho
     .map((r): SheetLancRow | null => {
@@ -67,12 +79,6 @@ export async function fetchSheetLancamentos(): Promise<SheetLancRow[]> {
       if (!lancamento) return null;
       const receita2026 = num(r[COL.receita2026]);
       const receita2027 = num(r[COL.receita2027]);
-      const receitaMensal: MonthlyValue[] = [];
-      if (revenueRun) {
-        for (let i = revenueRun.start; i <= revenueRun.end; i++) {
-          receitaMensal.push({ ...serialToYM(header[i]), value: num(r[i]) });
-        }
-      }
       return {
         lancamento,
         categoria: String(r[COL.categoria] || '').trim() || null,
@@ -81,7 +87,8 @@ export async function fetchSheetLancamentos(): Promise<SheetLancRow[]> {
         receita2026,
         receita2027,
         receitaTotal: receita2026 + receita2027,
-        receitaMensal,
+        receitaMensal: readMonthly(r, revenueRun),
+        quantidadeMensal: readMonthly(r, qtyRun),
       };
     })
     .filter((r): r is SheetLancRow => r !== null);

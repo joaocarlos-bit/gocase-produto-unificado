@@ -410,6 +410,7 @@ export function AlocacaoRecurso() {
   const [lancYear, setLancYear] = useState<'2026' | '2027'>('2026');
   const [sortBy, setSortBy] = useState<'total' | 'nome'>('total');
   const [modal, setModal] = useState<{ title: string; accent: string; items: LaunchAllocItem[] } | null>(null);
+  const [delayDetail, setDelayDetail] = useState<{ name: string; mesOriginal: string; mesNovo: string; splitNota?: string; meses: { label: string; qty: number; receita: number }[]; total: number } | null>(null);
   const [allocSearch, setAllocSearch] = useState('');
   const [allocSquads, setAllocSquads] = useState<string[]>([]);
   const [personFilter, setPersonFilter] = useState<string | null>(null);
@@ -766,9 +767,10 @@ export function AlocacaoRecurso() {
     return null;
   }
 
+  interface DelayMonthDetail { label: string; qty: number; receita: number }
   interface DelayImpactRow {
     name: string; year: '2026' | '2027'; mesOriginal: string; mesNovo: string; mesesAtraso: number;
-    perdaEstimada: number; splitNota?: string; row: CatRow | undefined;
+    perdaEstimada: number; splitNota?: string; row: CatRow | undefined; meses: DelayMonthDetail[];
   }
   const delayImpactAll: DelayImpactRow[] = catRows
     .map((r): DelayImpactRow | null => {
@@ -776,23 +778,30 @@ export function AlocacaoRecurso() {
       if (!info || info.mesesAtraso <= 0) return null;
       const match = findSheetRowForDelay(r.name, sheetIndex);
       if (!match) return null;
+      const qtyByYm = new Map(match.row.quantidadeMensal.map((mv) => [ymKey(mv), mv.value]));
+      const meses: DelayMonthDetail[] = [];
       let perda = 0;
       let mesesComDados = 0;
       match.row.receitaMensal.forEach((mv) => {
         const ym: YM = { year: mv.year, month: mv.month };
-        if (ymCompare(ym, info.de) >= 0 && ymCompare(ym, info.paraEfetivo) < 0 && mv.value > 0) {
-          perda += mv.value;
-          mesesComDados += 1;
+        if (ymCompare(ym, info.de) >= 0 && ymCompare(ym, info.paraEfetivo) < 0) {
+          const receita = mv.value / match.splitEntre;
+          const qty = (qtyByYm.get(ymKey(ym)) || 0) / match.splitEntre;
+          meses.push({ label: ymLabel(ym), qty, receita });
+          if (mv.value > 0) { perda += mv.value; mesesComDados += 1; }
         }
       });
       if (mesesComDados === 0) return null;
+      // `meses` já sai em ordem cronológica — receitaMensal é lido na mesma
+      // ordem das colunas do cabeçalho da planilha (crescente no tempo).
       return {
         name: r.name, year: r.year, mesOriginal: ymLabel(info.de), mesNovo: ymLabel(info.para), mesesAtraso: info.mesesAtraso,
         perdaEstimada: perda / match.splitEntre,
         splitNota: match.splitEntre > 1
-          ? `Divide a linha "${match.row.lancamento}" da planilha de Projeções com outra variante do Monday — receita mensal dividida igualmente entre elas.`
+          ? `Divide a linha "${match.row.lancamento}" da planilha de Projeções com outra variante do Monday — receita mensal (e quantidade) dividida igualmente entre elas.`
           : undefined,
         row: r,
+        meses,
       };
     })
     .filter((e): e is DelayImpactRow => e !== null);
@@ -1220,7 +1229,7 @@ export function AlocacaoRecurso() {
           {delayImpactVisible.length > 0 && (
             <Card
               title="Impacto de atrasos"
-              subtitle="Receita dos meses perdidos (mês original até o mês novo), lida da curva mensal da planilha de Projeções · clique numa linha pra filtrar a aba inteira por ela"
+              subtitle="Receita dos meses perdidos (mês original até o mês novo), lida da curva mensal da planilha de Projeções · clique numa linha pra ver o detalhe mês a mês"
               right={<span className="ar-delay-total">{fmtBRL(delayTotal)}</span>}
             >
               <div className="g-tablewrap">
@@ -1240,8 +1249,7 @@ export function AlocacaoRecurso() {
                       <tr
                         key={e.name}
                         className="ar-clickrow"
-                        onClick={() => toggleCatNameFilter(e.name)}
-                        style={catNameFilter === e.name ? { background: 'var(--brand-blue-l)' } : undefined}
+                        onClick={() => setDelayDetail({ name: e.name, mesOriginal: e.mesOriginal, mesNovo: e.mesNovo, splitNota: e.splitNota, meses: e.meses, total: e.perdaEstimada })}
                       >
                         <td className="g-name"><span className="g-name__text">{e.name}</span></td>
                         <td>{e.row && <CategoriaBadge categoria={e.row.categoria} />}</td>
@@ -1562,6 +1570,41 @@ export function AlocacaoRecurso() {
             )}
           </Card>
         </>
+      )}
+
+      {delayDetail && (
+        <div className="g-modal" onClick={() => setDelayDetail(null)}>
+          <div className="g-modal__box ar-modal--wide" onClick={(e) => e.stopPropagation()}>
+            <div className="g-modal__head">
+              <strong>{delayDetail.name} <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>({delayDetail.mesOriginal} → {delayDetail.mesNovo})</span></strong>
+              <button className="g-modal__x" onClick={() => setDelayDetail(null)}>✕</button>
+            </div>
+            <div className="g-modal__body">
+              <div className="g-tablewrap">
+                <table className="g-table">
+                  <thead><tr><th>Mês</th><th className="c">Quantidade</th><th className="c">Receita perdida</th></tr></thead>
+                  <tbody>
+                    {delayDetail.meses.map((m) => (
+                      <tr key={m.label}>
+                        <td className="m">{m.label}</td>
+                        <td className="c">{m.qty > 0 ? Math.round(m.qty).toLocaleString('pt-BR') : <span className="g-mut">—</span>}</td>
+                        <td className="c">{m.receita > 0 ? fmtBRL(m.receita) : <span className="g-mut">—</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td className="b">Total</td>
+                      <td className="c b">{Math.round(delayDetail.meses.reduce((s, m) => s + m.qty, 0)).toLocaleString('pt-BR')}</td>
+                      <td className="c b ar-delay-loss">{fmtBRL(delayDetail.total)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              {delayDetail.splitNota && <p className="ar-note" style={{ marginTop: 10 }}>{delayDetail.splitNota}</p>}
+            </div>
+          </div>
+        </div>
       )}
 
       {modal && (
